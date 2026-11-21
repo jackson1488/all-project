@@ -17,13 +17,6 @@ enum class ActiveOverlayScreen {
     CHAT_ROOM,
     GROUP_INFO,
     PEER_PROFILE,
-    SERVICE_WEATHER,
-    SERVICE_CURRENCY,
-    SERVICE_MUSIC,
-    SERVICE_GAMES,
-    SERVICE_WALLET,
-    SERVICE_BANK,
-    SERVICE_BROWSER,
     SETTINGS_ACCOUNT,
     SETTINGS_ACCOUNT_INFO,
     SETTINGS_PRIVACY,
@@ -31,7 +24,6 @@ enum class ActiveOverlayScreen {
     SETTINGS_DEVICES,
     SETTINGS_APPEARANCE,
     SETTINGS_STORAGE,
-    SETTINGS_SERVER,
     SETTINGS_ABOUT
 }
 
@@ -54,6 +46,8 @@ data class NeongramUiState(
     val currentSessionId: String? = null,
     val qrAuthToken: String = "",
     val twoFactorChallengeId: String? = null,
+    val aiModel: String = "fast",
+    val aiMode: String = "default",
     val weatherData: WeatherForecastData = WeatherForecastData(),
     val cryptoRates: List<CryptoCoinRate> = emptyList(),
     val musicTracks: List<MusicTrackDto> = emptyList(),
@@ -75,7 +69,7 @@ class NeongramViewModel(application: Application) : AndroidViewModel(application
     init {
         viewModelScope.launch {
             sessionStore.sessionFlow.collect { stored ->
-                api.baseUrl = stored.serverUrl.ifBlank { "https://cloud.neongram.space" }
+                api.baseUrl = "https://cloud.neongram.space"
                 _uiState.update { it.copy(session = stored) }
                 if (stored.isAuthenticated) {
                     socketManager.connect(api.baseUrl, stored.accessToken)
@@ -145,6 +139,45 @@ class NeongramViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun setAiModel(model: String) {
+        _uiState.update { it.copy(aiModel = model) }
+    }
+
+    fun setAiMode(mode: String) {
+        _uiState.update { it.copy(aiMode = mode) }
+    }
+
+    fun sendAiPrompt(prompt: String) {
+        val cleanPrompt = prompt.trim()
+        if (cleanPrompt.isBlank()) {
+            openAiAssistantChat()
+            return
+        }
+        val token = _uiState.value.session.accessToken
+        if (token.isBlank()) return
+
+        val existingAiChat = _uiState.value.chats.firstOrNull { it.isAiChat }
+        if (existingAiChat != null) {
+            openChat(existingAiChat)
+            sendMessage(cleanPrompt)
+        } else {
+            viewModelScope.launch {
+                api.getChats(token).onSuccess { list ->
+                    _uiState.update { it.copy(chats = list) }
+                    val aiChat = list.firstOrNull { it.isAiChat }
+                    if (aiChat != null) {
+                        openChat(aiChat)
+                        sendMessage(cleanPrompt)
+                    } else {
+                        showToast("Чат Neongram AI не найден")
+                    }
+                }.onFailure {
+                    showToast("Чат Neongram AI загружается...")
+                }
+            }
+        }
+    }
+
     fun updateAppearance(
         themeId: String? = null,
         useSystemTheme: Boolean? = null,
@@ -174,10 +207,6 @@ class NeongramViewModel(application: Application) : AndroidViewModel(application
         _uiState.update { it.copy(overlayScreen = screen) }
         when (screen) {
             ActiveOverlayScreen.AUTH_QR -> generateQrLoginToken()
-            ActiveOverlayScreen.SERVICE_WEATHER -> loadWeather()
-            ActiveOverlayScreen.SERVICE_CURRENCY -> loadCryptoRates()
-            ActiveOverlayScreen.SERVICE_MUSIC -> loadMusic()
-            ActiveOverlayScreen.SERVICE_WALLET -> loadWallet()
             ActiveOverlayScreen.SETTINGS_DEVICES -> loadSessions()
             else -> {}
         }
@@ -199,14 +228,14 @@ class NeongramViewModel(application: Application) : AndroidViewModel(application
         _uiState.update { it.copy(overlayScreen = next) }
     }
 
-    fun login(username: String, password: String, serverUrl: String) {
+    fun login(username: String, password: String, serverUrl: String = "https://cloud.neongram.space") {
         if (username.isBlank() || password.isBlank()) {
             _uiState.update { it.copy(errorMessage = "Заполните все поля") }
             return
         }
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
-            api.baseUrl = serverUrl.trimEnd('/')
+            api.baseUrl = "https://cloud.neongram.space"
             val result = api.login(username, password)
             result.onSuccess { resp ->
                 val token = resp.accessToken.orEmpty()
@@ -267,7 +296,7 @@ class NeongramViewModel(application: Application) : AndroidViewModel(application
         _uiState.update { it.copy(twoFactorChallengeId = null, errorMessage = null) }
     }
 
-    fun register(username: String, password: String, confirmPassword: String, serverUrl: String) {
+    fun register(username: String, password: String, confirmPassword: String, serverUrl: String = "https://cloud.neongram.space") {
         if (username.isBlank() || password.isBlank()) {
             _uiState.update { it.copy(errorMessage = "Заполните все поля") }
             return
@@ -282,7 +311,7 @@ class NeongramViewModel(application: Application) : AndroidViewModel(application
         }
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
-            api.baseUrl = serverUrl.trimEnd('/')
+            api.baseUrl = "https://cloud.neongram.space"
             val result = api.register(username, password)
             result.onSuccess { resp ->
                 val token = resp.accessToken.orEmpty()
@@ -715,17 +744,17 @@ class NeongramViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun saveServerUrl(url: String) {
+    fun saveServerUrl(url: String = "https://cloud.neongram.space") {
         viewModelScope.launch {
-            api.baseUrl = url.trimEnd('/')
-            sessionStore.setServerUrl(url.trimEnd('/'))
-            showToast("Сервер сохранен: ${api.baseUrl}")
+            api.baseUrl = "https://cloud.neongram.space"
+            sessionStore.setServerUrl("https://cloud.neongram.space")
+            showToast("Сервер: ${api.baseUrl}")
         }
     }
 
-    fun testServerHealth(url: String) {
+    fun testServerHealth(url: String = "https://cloud.neongram.space") {
         viewModelScope.launch {
-            api.checkHealth(url).onSuccess { ok ->
+            api.checkHealth("https://cloud.neongram.space").onSuccess { ok ->
                 showToast(if (ok) "Сервер доступен (OK)" else "Сервер недоступен")
             }.onFailure {
                 showToast("Ошибка соединения с сервером")

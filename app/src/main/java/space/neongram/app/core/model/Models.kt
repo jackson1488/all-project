@@ -148,12 +148,12 @@ data class ChatDto(
             ?: members.firstOrNull()?.user
     }
 
-    fun resolveAvatarUrl(currentUserId: String, serverBaseUrl: String): String? {
+    fun resolveAvatarUrl(currentUserId: String, serverBaseUrl: String = "https://cloud.neongram.space"): String? {
         val raw = avatarUrl?.takeIf { it.isNotBlank() }
             ?: resolvePeerUser(currentUserId)?.avatarUrl?.takeIf { it.isNotBlank() }
             ?: return null
         if (raw.startsWith("http://") || raw.startsWith("https://")) return raw
-        val base = serverBaseUrl.trimEnd('/')
+        val base = serverBaseUrl.ifBlank { "https://cloud.neongram.space" }.trimEnd('/')
         return if (raw.startsWith("/")) "$base$raw" else "$base/$raw"
     }
 }

@@ -411,7 +411,8 @@ class NeongramViewModel(application: Application) : AndroidViewModel(application
     private fun startQrPolling(token: String) {
         qrPollingJob?.cancel()
         qrPollingJob = viewModelScope.launch {
-            while (isActive && _uiState.value.overlayScreen == ActiveOverlayScreen.AUTH_QR && !_uiState.value.session.isAuthenticated) {
+            var keepPolling = true
+            while (keepPolling && isActive && _uiState.value.overlayScreen == ActiveOverlayScreen.AUTH_QR && !_uiState.value.session.isAuthenticated) {
                 delay(2000L)
                 api.checkAuthQrStatus(token).onSuccess { statusResp ->
                     val st = statusResp.status.lowercase()
@@ -438,9 +439,9 @@ class NeongramViewModel(application: Application) : AndroidViewModel(application
                                 showToast("Вход по QR выполнен")
                             }
                         }
-                        break
+                        keepPolling = false
                     } else if (st == "expired") {
-                        break
+                        keepPolling = false
                     }
                 }
             }

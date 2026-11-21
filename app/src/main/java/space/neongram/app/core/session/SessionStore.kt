@@ -3,6 +3,7 @@ package space.neongram.app.core.session
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
@@ -24,7 +25,10 @@ data class StoredSession(
     val fontSize: String = "medium",
     val bubbleColorHex: String = "",
     val bubbleScope: String = "mine",
-    val wallpaper: String = "gradient"
+    val wallpaper: String = "gradient",
+    val pinCode: String = "",
+    val lockMode: String = "none",
+    val autoLockMinutes: Int = 5
 ) {
     val isAuthenticated: Boolean
         get() = accessToken.isNotBlank() && userId.isNotBlank()
@@ -46,9 +50,13 @@ class SessionStore(private val context: Context) {
         private val KEY_BUBBLE_COLOR = stringPreferencesKey("bubble_color_hex")
         private val KEY_BUBBLE_SCOPE = stringPreferencesKey("bubble_scope")
         private val KEY_WALLPAPER = stringPreferencesKey("wallpaper")
+        private val KEY_PIN_CODE = stringPreferencesKey("pin_code")
+        private val KEY_LOCK_MODE = stringPreferencesKey("lock_mode")
+        private val KEY_AUTO_LOCK_MINUTES = intPreferencesKey("auto_lock_minutes")
     }
 
     val sessionFlow: Flow<StoredSession> = context.dataStore.data.map { prefs ->
+        val pin = prefs[KEY_PIN_CODE] ?: ""
         StoredSession(
             accessToken = prefs[KEY_ACCESS_TOKEN] ?: "",
             refreshToken = prefs[KEY_REFRESH_TOKEN] ?: "",
@@ -63,7 +71,10 @@ class SessionStore(private val context: Context) {
             fontSize = prefs[KEY_FONT_SIZE] ?: "medium",
             bubbleColorHex = prefs[KEY_BUBBLE_COLOR] ?: "",
             bubbleScope = prefs[KEY_BUBBLE_SCOPE] ?: "mine",
-            wallpaper = prefs[KEY_WALLPAPER] ?: "gradient"
+            wallpaper = prefs[KEY_WALLPAPER] ?: "gradient",
+            pinCode = pin,
+            lockMode = prefs[KEY_LOCK_MODE] ?: if (pin.isNotBlank()) "pin" else "none",
+            autoLockMinutes = prefs[KEY_AUTO_LOCK_MINUTES] ?: 5
         )
     }
 
@@ -113,6 +124,20 @@ class SessionStore(private val context: Context) {
             bubbleColorHex?.let { prefs[KEY_BUBBLE_COLOR] = it }
             bubbleScope?.let { prefs[KEY_BUBBLE_SCOPE] = it }
             wallpaper?.let { prefs[KEY_WALLPAPER] = it }
+        }
+    }
+
+    suspend fun setPinCode(pin: String) {
+        val clean = pin.trim()
+        context.dataStore.edit { prefs ->
+            prefs[KEY_PIN_CODE] = clean
+            prefs[KEY_LOCK_MODE] = if (clean.isNotBlank()) "pin" else "none"
+        }
+    }
+
+    suspend fun setAutoLockMinutes(minutes: Int) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_AUTO_LOCK_MINUTES] = minutes.coerceAtLeast(1)
         }
     }
 

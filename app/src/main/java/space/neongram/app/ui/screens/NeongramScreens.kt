@@ -27,8 +27,9 @@ import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
@@ -39,7 +40,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -50,6 +53,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -76,7 +80,7 @@ fun NeongramRootScreen(viewModel: NeongramViewModel) {
     ) {
         val scheme = LocalNeonScheme.current
 
-        BackHandler(enabled = state.overlayScreen != ActiveOverlayScreen.NONE) {
+        BackHandler(enabled = state.overlayScreen != ActiveOverlayScreen.NONE && !state.isAppLocked) {
             viewModel.navigateBack()
         }
 
@@ -103,7 +107,7 @@ fun NeongramRootScreen(viewModel: NeongramViewModel) {
                             state = state,
                             onBack = { viewModel.navigateBack() },
                             onRegenerate = { viewModel.generateQrLoginToken() },
-                            onApproveToken = { viewModel.approveQrToken(it) }
+                            onApproveToken = { viewModel.handleScannedQrPayload(it) }
                         )
                     } else {
                         AuthScreen(
@@ -118,6 +122,13 @@ fun NeongramRootScreen(viewModel: NeongramViewModel) {
                     }
                 }
 
+                state.session.isAuthenticated && state.isAppLocked -> {
+                    PinLockOverlayScreen(
+                        state = state,
+                        onUnlock = { viewModel.unlockWithPin(it) }
+                    )
+                }
+
                 else -> {
                     when (state.overlayScreen) {
                         ActiveOverlayScreen.NONE -> MainFiveTabsScaffold(
@@ -128,7 +139,7 @@ fun NeongramRootScreen(viewModel: NeongramViewModel) {
                             state = state,
                             onBack = { viewModel.navigateBack() },
                             onRegenerate = { viewModel.generateQrLoginToken() },
-                            onApproveToken = { viewModel.approveQrToken(it) }
+                            onApproveToken = { viewModel.handleScannedQrPayload(it) }
                         )
                         ActiveOverlayScreen.CHAT_ROOM -> ChatRoomScreen(
                             state = state,
@@ -265,15 +276,14 @@ fun NeongramRootScreen(viewModel: NeongramViewModel) {
 private data class LiquidDockTabItem(
     val index: Int,
     val title: String,
-    val icon: ImageVector,
-    val isAiCenter: Boolean = false
+    val icon: ImageVector
 )
 
 /**
- * 2026 iOS 18 Liquid Glass & Aurora Violet 5-Tab Scaffold (`template_3_ios_liquid_aurora`).
- * Features a Floating Frosted Liquid Glass Dock Capsule at the bottom (`paddingHorizontal = 16.dp`,
- * `paddingBottom = 14.dp`, `RoundedCornerShape(30.dp)`, `height = 74.dp`) with specular diagonal
- * refraction border and glowing cyan/violet active pill indicator.
+ * 2026 iOS 18 Liquid Glass & Aurora Violet 4-Tab Scaffold (`template_3_ios_liquid_aurora`).
+ * Features a Floating Frosted Liquid Glass Dock Capsule overlaying the bottom of the screen
+ * (`Color(0x9912162E)` translucent frosted glass + `1.dp` specular border) so the chat list
+ * scrolls smoothly behind the floating glass dock.
  */
 @Composable
 fun MainFiveTabsScaffold(
@@ -296,17 +306,11 @@ fun MainFiveTabsScaffold(
             ),
             LiquidDockTabItem(
                 index = 2,
-                title = "Neongram AI",
-                icon = Icons.Default.AutoAwesome,
-                isAiCenter = true
-            ),
-            LiquidDockTabItem(
-                index = 3,
                 title = tr(lang, "Настройки", "Баптоолор", "Settings"),
                 icon = Icons.Default.Settings
             ),
             LiquidDockTabItem(
-                index = 4,
+                index = 3,
                 title = tr(lang, "Профиль", "Профиль", "Profile"),
                 icon = Icons.Default.Person
             )
@@ -314,22 +318,18 @@ fun MainFiveTabsScaffold(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // Screen content with bottom padding for the floating dock capsule
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(bottom = 88.dp)
-        ) {
+        // Screen content fills the entire height so lists scroll smoothly behind the floating glass dock
+        Box(modifier = Modifier.fillMaxSize()) {
             when (state.selectedTabIndex) {
                 0 -> ChatsTabScreen(state = state, viewModel = viewModel)
                 1 -> ContactsTabScreen(state = state, viewModel = viewModel)
-                2 -> ServicesTabScreen(state = state, viewModel = viewModel)
-                3 -> SettingsTabScreen(state = state, viewModel = viewModel)
-                4 -> ProfileTabScreen(state = state, viewModel = viewModel)
+                2 -> SettingsTabScreen(state = state, viewModel = viewModel)
+                3, 4 -> ProfileTabScreen(state = state, viewModel = viewModel)
+                else -> ChatsTabScreen(state = state, viewModel = viewModel)
             }
         }
 
-        // Floating Frosted Liquid Glass Dock Capsule
+        // Floating Frosted Liquid Glass Dock Capsule overlaying bottom
         val dockShape = RoundedCornerShape(30.dp)
         Box(
             modifier = Modifier
@@ -348,20 +348,20 @@ fun MainFiveTabsScaffold(
                 .background(
                     Brush.linearGradient(
                         colors = listOf(
-                            Color(0xCC141834),
-                            Color(0xB30E1126)
+                            Color(0x9912162E),
+                            Color(0x990D1024)
                         ),
                         start = Offset(0f, 0f),
                         end = Offset(900f, 220f)
                     )
                 )
                 .border(
-                    width = 1.2.dp,
+                    width = 1.dp,
                     brush = Brush.linearGradient(
                         colors = listOf(
                             Color.White.copy(alpha = 0.38f),
-                            Color(0xFF2FF2FF).copy(alpha = 0.25f),
-                            Color(0xFFA855F7).copy(alpha = 0.20f)
+                            Color(0xFF2FF2FF).copy(alpha = 0.28f),
+                            Color(0xFFA855F7).copy(alpha = 0.22f)
                         ),
                         start = Offset(0f, 0f),
                         end = Offset(900f, 240f)
@@ -372,11 +372,12 @@ fun MainFiveTabsScaffold(
         ) {
             Row(
                 modifier = Modifier.fillMaxSize(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 tabs.forEach { tab ->
-                    val selected = state.selectedTabIndex == tab.index
+                    val selected = state.selectedTabIndex == tab.index ||
+                        (tab.index == 3 && state.selectedTabIndex == 4)
                     val scale by animateFloatAsState(
                         targetValue = if (selected) 1.04f else 1.0f,
                         animationSpec = spring(
@@ -386,19 +387,11 @@ fun MainFiveTabsScaffold(
                         label = "tabScale_${tab.index}"
                     )
                     val iconTint by animateColorAsState(
-                        targetValue = when {
-                            selected -> Color(0xFF2FF2FF)
-                            tab.isAiCenter -> Color(0xFFD8B4FE)
-                            else -> Color(0xFF9EA9CC)
-                        },
+                        targetValue = if (selected) Color(0xFF2FF2FF) else Color(0xFF9EA9CC),
                         label = "tabIconTint_${tab.index}"
                     )
                     val labelColor by animateColorAsState(
-                        targetValue = when {
-                            selected -> Color(0xFF2FF2FF)
-                            tab.isAiCenter -> Color(0xFFE9D5FF)
-                            else -> Color(0xFF9EA9CC)
-                        },
+                        targetValue = if (selected) Color(0xFF2FF2FF) else Color(0xFF9EA9CC),
                         label = "tabLabelColor_${tab.index}"
                     )
 
@@ -473,14 +466,14 @@ fun MainFiveTabsScaffold(
                                     imageVector = tab.icon,
                                     contentDescription = tab.title,
                                     tint = iconTint,
-                                    modifier = Modifier.size(if (tab.isAiCenter) 23.dp else 22.dp)
+                                    modifier = Modifier.size(22.dp)
                                 )
                             }
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = tab.title,
                                 color = labelColor,
-                                fontSize = 10.sp,
+                                fontSize = 11.sp,
                                 fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.SemiBold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -490,5 +483,278 @@ fun MainFiveTabsScaffold(
                 }
             }
         }
+    }
+}
+
+/**
+ * Full-screen Liquid Glass PIN Lock Overlay with a 4-dot glowing cyan indicator
+ * and frosted glass circular numpad (0..9, backspace).
+ */
+@Composable
+fun PinLockOverlayScreen(
+    state: NeongramUiState,
+    onUnlock: (String) -> Boolean
+) {
+    val lang = state.session.language
+    val targetLength = state.session.pinCode.length.coerceIn(4, 8)
+    var enteredPin by remember { mutableStateOf("") }
+    var hasError by remember { mutableStateOf(false) }
+
+    fun appendDigit(digit: String) {
+        if (enteredPin.length < targetLength) {
+            val next = enteredPin + digit
+            enteredPin = next
+            hasError = false
+            if (next.length == targetLength) {
+                val ok = onUnlock(next)
+                if (!ok) {
+                    hasError = true
+                    enteredPin = ""
+                }
+            }
+        }
+    }
+
+    fun deleteLast() {
+        if (enteredPin.isNotEmpty()) {
+            enteredPin = enteredPin.dropLast(1)
+            hasError = false
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xEE080B1A),
+                        Color(0xF50E132B),
+                        Color(0xFA060813)
+                    )
+                )
+            )
+            .padding(horizontal = 28.dp, vertical = 32.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            // Glowing Lock Badge
+            Box(
+                modifier = Modifier
+                    .size(72.dp)
+                    .shadow(
+                        elevation = 22.dp,
+                        shape = CircleShape,
+                        ambientColor = Color(0x882FF2FF),
+                        spotColor = Color(0x888B5CF6)
+                    )
+                    .clip(CircleShape)
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(
+                                Color(0x3D2FF2FF),
+                                Color(0x338B5CF6)
+                            )
+                        )
+                    )
+                    .border(
+                        width = 1.2.dp,
+                        brush = Brush.linearGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = 0.45f),
+                                Color(0xFF2FF2FF).copy(alpha = 0.6f),
+                                Color(0xFFA855F7).copy(alpha = 0.45f)
+                            )
+                        ),
+                        shape = CircleShape
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Lock,
+                    contentDescription = "PIN Lock",
+                    tint = Color(0xFF2FF2FF),
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Text(
+                text = tr(lang, "Введите PIN-код", "PIN-кодду киргизиңиз", "Enter PIN Code"),
+                color = Color(0xFFF3F5FF),
+                fontSize = 22.sp,
+                fontWeight = FontWeight.ExtraBold,
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Text(
+                text = if (hasError) {
+                    tr(lang, "Неверный PIN-код, попробуйте снова", "Туура эмес PIN-код", "Incorrect PIN code, try again")
+                } else {
+                    tr(lang, "Neongram защищён кодом доступа", "Neongram PIN-код менен корголгон", "Neongram is protected with a passcode")
+                },
+                color = if (hasError) Color(0xFFFF5C8A) else Color(0xFF9EA9CC),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            // 4-dot (or targetLength) glowing cyan indicator
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                for (i in 0 until targetLength) {
+                    val filled = i < enteredPin.length
+                    val dotColor by animateColorAsState(
+                        targetValue = when {
+                            hasError -> Color(0xFFFF4D6D)
+                            filled -> Color(0xFF2FF2FF)
+                            else -> Color(0x339EA9CC)
+                        },
+                        label = "pinDot_$i"
+                    )
+                    val dotScale by animateFloatAsState(
+                        targetValue = if (filled) 1.18f else 1.0f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                            stiffness = Spring.StiffnessMedium
+                        ),
+                        label = "pinDotScale_$i"
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .size(16.dp)
+                            .scale(dotScale)
+                            .then(
+                                if (filled) {
+                                    Modifier.shadow(
+                                        elevation = 12.dp,
+                                        shape = CircleShape,
+                                        ambientColor = Color(0xAA2FF2FF),
+                                        spotColor = Color(0xAA2FF2FF)
+                                    )
+                                } else {
+                                    Modifier
+                                }
+                            )
+                            .clip(CircleShape)
+                            .background(dotColor)
+                            .border(
+                                width = 1.dp,
+                                color = if (filled) Color.White.copy(alpha = 0.7f) else Color.White.copy(alpha = 0.25f),
+                                shape = CircleShape
+                            )
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(38.dp))
+
+            // Frosted Glass Circular Numpad (1..9, 0, backspace)
+            val rows = listOf(
+                listOf("1", "2", "3"),
+                listOf("4", "5", "6"),
+                listOf("7", "8", "9"),
+                listOf("", "0", "DEL")
+            )
+
+            Column(
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                rows.forEach { row ->
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(24.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        row.forEach { key ->
+                            when (key) {
+                                "" -> {
+                                    Spacer(modifier = Modifier.size(74.dp))
+                                }
+                                "DEL" -> {
+                                    PinNumpadCircleButton(
+                                        onClick = { deleteLast() }
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.Backspace,
+                                            contentDescription = "Backspace",
+                                            tint = Color(0xFFE2E8F0),
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                }
+                                else -> {
+                                    PinNumpadCircleButton(
+                                        onClick = { appendDigit(key) }
+                                    ) {
+                                        Text(
+                                            text = key,
+                                            color = Color(0xFFF8FAFC),
+                                            fontSize = 26.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PinNumpadCircleButton(
+    onClick: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(74.dp)
+            .shadow(
+                elevation = 12.dp,
+                shape = CircleShape,
+                ambientColor = Color(0x332FF2FF),
+                spotColor = Color(0x448B5CF6)
+            )
+            .clip(CircleShape)
+            .background(
+                Brush.linearGradient(
+                    colors = listOf(
+                        Color(0x99192042),
+                        Color(0x8010142C)
+                    ),
+                    start = Offset(0f, 0f),
+                    end = Offset(140f, 140f)
+                )
+            )
+            .border(
+                width = 1.dp,
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        Color.White.copy(alpha = 0.35f),
+                        Color(0xFF2FF2FF).copy(alpha = 0.25f),
+                        Color(0xFFA855F7).copy(alpha = 0.20f)
+                    )
+                ),
+                shape = CircleShape
+            )
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        content()
     }
 }

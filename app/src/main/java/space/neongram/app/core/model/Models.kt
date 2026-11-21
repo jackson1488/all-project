@@ -248,7 +248,55 @@ data class QrStartResponse(
 @Serializable
 data class QrStatusResponse(
     val status: String = "pending",
-    val approvedBy: UserDto? = null
+    val token: String = "",
+    val expiresAt: String? = null,
+    val approvedBy: UserDto? = null,
+    val user: UserDto? = null
+)
+
+@Serializable
+data class AvatarUploadResponse(
+    val avatarUrl: String? = null,
+    val user: UserDto? = null
+)
+
+@Serializable
+data class GroupResponse(
+    val group: ChatDto? = null
+)
+
+@Serializable
+data class BlockedUserEntryDto(
+    val id: String = "",
+    val blockedId: String = "",
+    val createdAt: String = "",
+    val blocked: UserDto? = null
+)
+
+@Serializable
+data class BlocksListResponse(
+    val blocks: List<BlockedUserEntryDto> = emptyList()
+)
+
+@Serializable
+data class GroupJoinRequestDto(
+    val id: String = "",
+    val status: String = "PENDING",
+    val note: String? = null,
+    val createdAt: String = "",
+    val user: UserDto? = null
+)
+
+@Serializable
+data class GroupJoinRequestsResponse(
+    val requests: List<GroupJoinRequestDto> = emptyList()
+)
+
+data class DevicePhotoItem(
+    val uriString: String,
+    val displayName: String,
+    val dateAdded: Long,
+    val mimeType: String = "image/jpeg"
 )
 
 @Serializable

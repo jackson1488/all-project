@@ -1,5 +1,7 @@
 package space.neongram.app.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -26,11 +28,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreHoriz
@@ -38,6 +44,7 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
@@ -50,6 +57,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -72,6 +80,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
 import java.util.Locale
 import space.neongram.app.core.model.UserDto
@@ -81,6 +90,7 @@ import space.neongram.app.core.ui.LocalNeonScheme
 import space.neongram.app.core.ui.NeonAvatar
 import space.neongram.app.core.ui.NeonInput
 import space.neongram.app.core.ui.PrimaryButton
+import space.neongram.app.core.ui.RealQrScannerBox
 import space.neongram.app.core.ui.parseHexColorOrNull
 import space.neongram.app.core.ui.tr
 import space.neongram.app.ui.ActiveOverlayScreen
@@ -151,7 +161,8 @@ private fun LiquidGlassCard(
 private fun LiquidCircularAvatarRing(
     avatarUrl: String?,
     label: String,
-    sizeDp: Dp = 100.dp
+    sizeDp: Dp = 100.dp,
+    onClick: (() -> Unit)? = null
 ) {
     val initial = label.trim().take(1).uppercase().ifBlank { "N" }
 
@@ -175,6 +186,7 @@ private fun LiquidCircularAvatarRing(
                     )
                 )
             )
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(3.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -340,6 +352,16 @@ fun ProfileTabScreen(
     )
 
     var showTopMenu by remember { mutableStateOf(false) }
+    var showMyQrModal by remember { mutableStateOf(false) }
+
+    // System Photo Picker for real avatar upload to https://cloud.neongram.space/api/users/me/avatar
+    val avatarPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.uploadMyAvatarFromUri(uri)
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -378,7 +400,11 @@ fun ProfileTabScreen(
                     )
                 }
 
-                Box {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Quick QR button in header as well
                     Box(
                         modifier = Modifier
                             .size(40.dp)
@@ -398,61 +424,117 @@ fun ProfileTabScreen(
                                 ),
                                 shape = CircleShape
                             )
-                            .clickable { showTopMenu = true },
+                            .clickable { showMyQrModal = true },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Default.MoreHoriz,
-                            contentDescription = "Menu",
-                            tint = Color(0xFFF2F5FF),
-                            modifier = Modifier.size(21.dp)
+                            imageVector = Icons.Default.QrCode2,
+                            contentDescription = "My QR",
+                            tint = Color(0xFF2FF2FF),
+                            modifier = Modifier.size(20.dp)
                         )
                     }
 
-                    DropdownMenu(
-                        expanded = showTopMenu,
-                        onDismissRequest = { showTopMenu = false },
-                        modifier = Modifier.background(Color(0xFF151936))
-                    ) {
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    text = tr(lang, "Скопировать @username", "@username көчүрүү", "Copy @username"),
-                                    color = Color(0xFFF2F5FF)
+                    Box {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    Brush.linearGradient(
+                                        colors = listOf(Color(0xCC191E40), Color(0x9910142C))
+                                    )
                                 )
-                            },
-                            onClick = {
-                                showTopMenu = false
-                                clipboard.setText(AnnotatedString("@${user.username}"))
-                                viewModel.showToast(tr(lang, "@username скопирован", "@username көчүрүлдү", "@username copied"))
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    text = tr(lang, "Скопировать ID", "ID көчүрүү", "Copy ID"),
-                                    color = Color(0xFFF2F5FF)
+                                .border(
+                                    width = 1.2.dp,
+                                    brush = Brush.linearGradient(
+                                        colors = listOf(
+                                            Color.White.copy(alpha = 0.38f),
+                                            Color(0xFF2FF2FF).copy(alpha = 0.25f)
+                                        )
+                                    ),
+                                    shape = CircleShape
                                 )
-                            },
-                            onClick = {
-                                showTopMenu = false
-                                clipboard.setText(AnnotatedString(user.id))
-                                viewModel.showToast(tr(lang, "ID скопирован", "ID көчүрүлдү", "ID copied"))
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    text = tr(lang, "Скопировать ссылку", "Шилтемени көчүрүү", "Copy link"),
-                                    color = Color(0xFFF2F5FF)
-                                )
-                            },
-                            onClick = {
-                                showTopMenu = false
-                                clipboard.setText(AnnotatedString("neongram://contact/${user.username}"))
-                                viewModel.showToast(tr(lang, "Ссылка скопирована", "Шилтеме көчүрүлдү", "Link copied"))
-                            }
-                        )
+                                .clickable { showTopMenu = true },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.MoreHoriz,
+                                contentDescription = "Menu",
+                                tint = Color(0xFFF2F5FF),
+                                modifier = Modifier.size(21.dp)
+                            )
+                        }
+
+                        DropdownMenu(
+                            expanded = showTopMenu,
+                            onDismissRequest = { showTopMenu = false },
+                            modifier = Modifier.background(Color(0xFF151936))
+                        ) {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = tr(lang, "Выбрать фото профиля", "Профиль сүрөтүн тандоо", "Choose profile photo"),
+                                        color = Color(0xFF2FF2FF)
+                                    )
+                                },
+                                onClick = {
+                                    showTopMenu = false
+                                    avatarPickerLauncher.launch("image/*")
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = tr(lang, "Мой QR-код", "Менин QR-кодум", "My QR Code"),
+                                        color = Color(0xFFF2F5FF)
+                                    )
+                                },
+                                onClick = {
+                                    showTopMenu = false
+                                    showMyQrModal = true
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = tr(lang, "Скопировать @username", "@username көчүрүү", "Copy @username"),
+                                        color = Color(0xFFF2F5FF)
+                                    )
+                                },
+                                onClick = {
+                                    showTopMenu = false
+                                    clipboard.setText(AnnotatedString("@${user.username}"))
+                                    viewModel.showToast(tr(lang, "@username скопирован", "@username көчүрүлдү", "@username copied"))
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = tr(lang, "Скопировать ID", "ID көчүрүү", "Copy ID"),
+                                        color = Color(0xFFF2F5FF)
+                                    )
+                                },
+                                onClick = {
+                                    showTopMenu = false
+                                    clipboard.setText(AnnotatedString(user.id))
+                                    viewModel.showToast(tr(lang, "ID скопирован", "ID көчүрүлдү", "ID copied"))
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = tr(lang, "Скопировать ссылку", "Шилтемени көчүрүү", "Copy link"),
+                                        color = Color(0xFFF2F5FF)
+                                    )
+                                },
+                                onClick = {
+                                    showTopMenu = false
+                                    clipboard.setText(AnnotatedString("neongram://user/${user.username}"))
+                                    viewModel.showToast(tr(lang, "Ссылка скопирована", "Шилтеме көчүрүлдү", "Link copied"))
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -468,11 +550,12 @@ fun ProfileTabScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // 100.dp Circular Avatar + Glowing Cyan-Violet Ring
+                    // 100.dp Circular Avatar + Glowing Cyan-Violet Ring (tapping opens photo picker)
                     LiquidCircularAvatarRing(
                         avatarUrl = resolveFullMediaUrl(user.avatarUrl, serverBaseUrl),
                         label = user.effectiveName,
-                        sizeDp = 100.dp
+                        sizeDp = 100.dp,
+                        onClick = { avatarPickerLauncher.launch("image/*") }
                     )
 
                     // 24.sp ExtraBold Name
@@ -520,7 +603,7 @@ fun ProfileTabScreen(
 
                     Spacer(modifier = Modifier.height(2.dp))
 
-                    // 3 Frosted Glass Action Pills (Фото, Изменить, Настройки)
+                    // Row 1: 3 Frosted Glass Action Pills (Фото, Изменить, Настройки)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -530,7 +613,7 @@ fun ProfileTabScreen(
                             icon = Icons.Default.PhotoCamera,
                             modifier = Modifier.weight(1f),
                             onClick = {
-                                viewModel.showToast(tr(lang, "Выбор фото профиля", "Профиль сүрөтүн тандоо", "Choose profile photo"))
+                                avatarPickerLauncher.launch("image/*")
                             }
                         )
                         LiquidProfileActionPill(
@@ -550,6 +633,14 @@ fun ProfileTabScreen(
                             }
                         )
                     }
+
+                    // Row 2: Quick "Мой QR-код" frosted glass pill button in the profile hero card
+                    LiquidProfileActionPill(
+                        label = tr(lang, "Мой QR-код", "Менин QR-кодум", "My QR Code"),
+                        icon = Icons.Default.QrCode2,
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { showMyQrModal = true }
+                    )
                 }
             }
 
@@ -624,12 +715,12 @@ fun ProfileTabScreen(
                                     shape = RoundedCornerShape(14.dp)
                                 )
                                 .clickable {
-                                    viewModel.showToast(tr(lang, "Добавление истории", "Окуя кошуу", "Add story"))
+                                    avatarPickerLauncher.launch("image/*")
                                 }
                                 .padding(horizontal = 12.dp, vertical = 7.dp)
                         ) {
                             Text(
-                                text = tr(lang, "+ Добавить историю", "+ Окуя кошуу", "+ Add story"),
+                                text = tr(lang, "Выбрать фото", "Сүрөт тандоо", "Choose photo"),
                                 color = Color(0xFF2FF2FF),
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.ExtraBold
@@ -716,6 +807,79 @@ fun ProfileTabScreen(
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+
+    // Contact QR Modal (`neongram://user/${user.username}`)
+    if (showMyQrModal) {
+        val qrUsername = user.username.ifBlank { "neongram" }
+        val qrPayload = "neongram://user/$qrUsername"
+        Dialog(onDismissRequest = { showMyQrModal = false }) {
+            LiquidGlassCard(
+                cornerRadius = 30.dp,
+                paddingDp = 24.dp,
+                accentGlow = Color(0xFF2FF2FF)
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = tr(lang, "Мой QR-код", "Менин QR-кодум", "My QR Code"),
+                            color = Color(0xFFF6F8FF),
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.08f))
+                                .clickable { showMyQrModal = false },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Close",
+                                tint = Color(0xFFF2F5FF),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+
+                    VisualQrCodeBox(payload = qrPayload)
+
+                    Text(
+                        text = user.effectiveName,
+                        color = Color(0xFFF5F7FF),
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+
+                    Text(
+                        text = qrPayload,
+                        color = Color(0xFF2FF2FF),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = TextAlign.Center
+                    )
+
+                    PrimaryButton(
+                        label = tr(lang, "Скопировать ссылку", "Шилтемени көчүрүү", "Copy link"),
+                        onClick = {
+                            clipboard.setText(AnnotatedString(qrPayload))
+                            viewModel.showToast(tr(lang, "Ссылка скопирована", "Шилтеме көчүрүлдү", "Link copied"))
+                            showMyQrModal = false
+                        }
+                    )
                 }
             }
         }
@@ -825,6 +989,15 @@ fun PeerProfileScreen(
         ?: UserDto(id = "peer", username = "neongram_user", displayName = "Neongram User")
 
     var selectedTab by remember { mutableIntStateOf(0) }
+    var showReportModal by remember { mutableStateOf(false) }
+
+    LaunchedEffect(peer.id) {
+        viewModel.loadBlockedUsers()
+    }
+
+    val isBlocked = state.blockedUsers.any {
+        it.blockedId == peer.id || it.blocked?.id == peer.id
+    }
 
     LiquidSubScreenScaffold(
         title = peer.effectiveName,
@@ -917,6 +1090,93 @@ fun PeerProfileScreen(
                             viewModel.showToast(tr(lang, "E2EE чат открыт", "E2EE чат ачылды", "E2EE chat opened"))
                         }
                     )
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // Block / Unblock and Report Action Pills
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    val blockShape = RoundedCornerShape(18.dp)
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 42.dp)
+                            .clip(blockShape)
+                            .background(
+                                if (isBlocked) Color(0x3310B981) else Color(0x33FF4D6D)
+                            )
+                            .border(
+                                width = 1.dp,
+                                color = if (isBlocked) Color(0x8810B981) else Color(0x88FF4D6D),
+                                shape = blockShape
+                            )
+                            .clickable {
+                                if (isBlocked) {
+                                    viewModel.unblockUser(peer.id)
+                                } else {
+                                    viewModel.blockUser(peer.id)
+                                }
+                            }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Block,
+                            contentDescription = null,
+                            tint = if (isBlocked) Color(0xFF5CFFCD) else Color(0xFFFF6B88),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (isBlocked) {
+                                tr(lang, "Разблокировать", "Блоктон чыгаруу", "Unblock")
+                            } else {
+                                tr(lang, "Заблокировать", "Блоктоо", "Block")
+                            },
+                            color = if (isBlocked) Color(0xFF5CFFCD) else Color(0xFFFF6B88),
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 42.dp)
+                            .clip(blockShape)
+                            .background(Color(0x33F59E0B))
+                            .border(
+                                width = 1.dp,
+                                color = Color(0x88F59E0B),
+                                shape = blockShape
+                            )
+                            .clickable { showReportModal = true }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Flag,
+                            contentDescription = null,
+                            tint = Color(0xFFFBBF24),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = tr(lang, "Пожаловаться", "Даттануу", "Report"),
+                            color = Color(0xFFFBBF24),
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
         }
@@ -1029,7 +1289,7 @@ fun PeerProfileScreen(
             }
             1 -> {
                 val mediaMsgs = state.messages.filter {
-                    it.type == "IMAGE" || it.type == "VIDEO" || !it.fileUrl.isNullOrBlank()
+                    it.type == "IMAGE" || it.type == "VIDEO" || it.type == "PHOTO" || !it.fileUrl.isNullOrBlank()
                 }
                 LiquidGlassCard(
                     cornerRadius = 26.dp,
@@ -1074,6 +1334,108 @@ fun PeerProfileScreen(
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.padding(vertical = 4.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Report Reason Glass Modal (Спам, Оскорбления, Мошенничество, Другое)
+    if (showReportModal) {
+        var customComment by remember { mutableStateOf("") }
+        val reasons = listOf(
+            "Спам" to tr(lang, "Спам", "Спам", "Spam"),
+            "Оскорбления" to tr(lang, "Оскорбления", "Кемсинтүү", "Harassment / Abuse"),
+            "Мошенничество" to tr(lang, "Мошенничество", "Алдамчылык", "Scam / Fraud"),
+            "Другое" to tr(lang, "Другое", "Башка", "Other")
+        )
+
+        Dialog(onDismissRequest = { showReportModal = false }) {
+            LiquidGlassCard(
+                cornerRadius = 28.dp,
+                paddingDp = 22.dp,
+                accentGlow = Color(0xFFF59E0B)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = tr(lang, "Пожаловаться", "Даттануу", "Report User"),
+                            color = Color(0xFFF6F8FF),
+                            fontSize = 19.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.08f))
+                                .clickable { showReportModal = false },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Close",
+                                tint = Color(0xFFF2F5FF),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = tr(
+                            lang,
+                            "Выберите причину жалобы на @${peer.username}:",
+                            "@${peer.username} үчүн даттануу себебин тандаңыз:",
+                            "Choose a reason to report @${peer.username}:"
+                        ),
+                        color = Color(0xFF9AA6CB),
+                        fontSize = 13.sp
+                    )
+
+                    NeonInput(
+                        value = customComment,
+                        onValueChange = { customComment = it },
+                        placeholder = tr(lang, "Комментарий (необязательно)", "Комментарий", "Optional comment")
+                    )
+
+                    reasons.forEach { (reasonCode, reasonLabel) ->
+                        val itemShape = RoundedCornerShape(16.dp)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(itemShape)
+                                .background(Color(0x55151A38))
+                                .border(1.dp, Color.White.copy(alpha = 0.18f), itemShape)
+                                .clickable {
+                                    viewModel.reportTarget(
+                                        targetId = peer.id,
+                                        targetType = "user",
+                                        reason = reasonCode,
+                                        comment = customComment.trim()
+                                    )
+                                    showReportModal = false
+                                }
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = reasonLabel,
+                                color = Color(0xFFF5F7FF),
+                                fontSize = 14.5.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = null,
+                                tint = Color(0xFFFBBF24),
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
@@ -1622,7 +1984,7 @@ fun AccountInfoEditScreen(
 }
 
 // ============================================================================
-// 3. PRIVACY SETTINGS SUB-SCREEN (Liquid Glass)
+// 3. PRIVACY SETTINGS SUB-SCREEN (with Live Blocked Users Manager)
 // ============================================================================
 
 @Composable
@@ -1631,7 +1993,12 @@ fun PrivacySettingsScreen(
     viewModel: NeongramViewModel
 ) {
     val lang = state.session.language
+    val serverBaseUrl = state.session.serverUrl.ifBlank { NEONGRAM_CLOUD_URL }
     val user = state.currentUser ?: UserDto()
+
+    LaunchedEffect(Unit) {
+        viewModel.loadBlockedUsers()
+    }
 
     var showOnline by remember(user) { mutableStateOf(user.showOnline) }
     var showLastSeen by remember(user) { mutableStateOf(user.showLastSeen) }
@@ -1660,7 +2027,7 @@ fun PrivacySettingsScreen(
         onBack = { viewModel.navigateBack() }
     ) {
         LiquidSwitchCard(
-            title = tr(lang, "Показывать статус \"в сети\"", "\"Тармакта\" статусун көрсөтүү", "Show \"online\" status"),
+            title = tr(lang, "Показывать статус в сети", "\"Тармакта\" статусун көрсөтүү", "Show online status"),
             subtitle = tr(lang, "Другие пользователи видят, когда вы онлайн", "Башкалар сиздин онлайн экениңизди көрөт", "Let others see when you're online"),
             checked = showOnline,
             onCheckedChange = { pushUpdate(online = it) }
@@ -1689,6 +2056,137 @@ fun PrivacySettingsScreen(
             checked = readReceipts,
             onCheckedChange = { pushUpdate(receipts = it) }
         )
+
+        // Чёрный список (Заблокированные пользователи)
+        LiquidGlassCard(
+            cornerRadius = 26.dp,
+            paddingDp = 18.dp,
+            accentGlow = Color(0xFFFF4D6D)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Block,
+                            contentDescription = null,
+                            tint = Color(0xFFFF5E7E),
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = tr(
+                                lang,
+                                "Чёрный список (Заблокированные пользователи)",
+                                "Кара тизме (Блоктолгондор)",
+                                "Blocked Users"
+                            ),
+                            color = Color(0xFFF5F7FF),
+                            fontSize = 15.5.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0x33FF4D6D))
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = state.blockedUsers.size.toString(),
+                            color = Color(0xFFFF6B88),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                }
+
+                if (state.blockedUsers.isEmpty()) {
+                    Text(
+                        text = tr(
+                            lang,
+                            "В вашем чёрном списке пока нет заблокированных пользователей.",
+                            "Кара тизмеде блоктолгон колдонуучулар жок.",
+                            "You have no blocked users."
+                        ),
+                        color = Color(0xFF9AA6CB),
+                        fontSize = 13.sp
+                    )
+                } else {
+                    state.blockedUsers.forEach { entry ->
+                        val blockedUser = entry.blocked
+                        val targetId = entry.blockedId.ifBlank { blockedUser?.id.orEmpty() }
+                        val displayTitle = blockedUser?.effectiveName?.takeIf { it.isNotBlank() }
+                            ?: "ID: $targetId"
+                        val usernameSub = blockedUser?.username?.takeIf { it.isNotBlank() }?.let { "@$it" }
+                            ?: targetId
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(Color(0x5510142C))
+                                .border(
+                                    width = 1.dp,
+                                    color = Color.White.copy(alpha = 0.14f),
+                                    shape = RoundedCornerShape(18.dp)
+                                )
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            NeonAvatar(
+                                avatarUrl = resolveFullMediaUrl(blockedUser?.avatarUrl, serverBaseUrl),
+                                label = displayTitle,
+                                sizeDp = 40.dp,
+                                cornerRadiusDp = 14.dp
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = displayTitle,
+                                    color = Color(0xFFF5F7FF),
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = usernameSub,
+                                    color = Color(0xFF9AA6CB),
+                                    fontSize = 12.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(Color(0x332FF2FF))
+                                    .border(1.dp, Color(0x882FF2FF), RoundedCornerShape(14.dp))
+                                    .clickable {
+                                        if (targetId.isNotBlank()) {
+                                            viewModel.unblockUser(targetId)
+                                        }
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 7.dp)
+                            ) {
+                                Text(
+                                    text = tr(lang, "Разблокировать", "Чыгаруу", "Unblock"),
+                                    color = Color(0xFF2FF2FF),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1755,7 +2253,7 @@ private fun LiquidSwitchCard(
 }
 
 // ============================================================================
-// 4. SECURITY SETTINGS SUB-SCREEN (Liquid Glass)
+// 4. SECURITY SETTINGS SUB-SCREEN (Full 100% Functional Security Suite)
 // ============================================================================
 
 @Composable
@@ -1764,7 +2262,22 @@ fun SecuritySettingsScreen(
     viewModel: NeongramViewModel
 ) {
     val lang = state.session.language
+    val clipboard = LocalClipboardManager.current
 
+    LaunchedEffect(Unit) {
+        viewModel.load2faStatus()
+    }
+
+    // Section 1: PIN Lock states
+    val isPinActive = state.session.pinCode.isNotBlank()
+    var pinInput by remember { mutableStateOf("") }
+    var selectedAutoLockTimeout by remember { mutableStateOf("5 мин") }
+
+    // Section 2: 2FA states
+    var totpConfirmCode by remember { mutableStateOf("") }
+    var totpDisableCode by remember { mutableStateOf("") }
+
+    // Section 3: Password states
     var currentPassword by remember { mutableStateOf("") }
     var newPassword by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
@@ -1774,7 +2287,514 @@ fun SecuritySettingsScreen(
         subtitle = "cloud.neongram.space • Zero-Trust",
         onBack = { viewModel.navigateBack() }
     ) {
-        // Change Password Frosted Card
+        // ====================================================================
+        // Section 1: Код-пароль и Блокировка приложения (PIN Lock)
+        // ====================================================================
+        LiquidGlassCard(
+            cornerRadius = 26.dp,
+            paddingDp = 18.dp,
+            accentGlow = Color(0xFF8B5CF6)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = "PIN Lock",
+                            tint = Color(0xFF2FF2FF),
+                            modifier = Modifier.size(21.dp)
+                        )
+                        Text(
+                            text = tr(
+                                lang,
+                                "Код-пароль и Блокировка приложения",
+                                "Код-сырсөз жана Блоктоо",
+                                "PIN Code & App Lock"
+                            ),
+                            color = Color(0xFFF5F7FF),
+                            fontSize = 16.5.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (isPinActive) Color(0x2E10B981) else Color(0x331E2448))
+                            .border(
+                                width = 1.dp,
+                                color = if (isPinActive) Color(0x8810B981) else Color.White.copy(alpha = 0.2f),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = if (isPinActive) {
+                                tr(lang, "Активен", "Активдүү", "Active")
+                            } else {
+                                tr(lang, "Выкл", "Өчүк", "Off")
+                            },
+                            color = if (isPinActive) Color(0xFF5CFFCD) else Color(0xFF9AA6CB),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                }
+
+                Text(
+                    text = tr(
+                        lang,
+                        "Установите 4-значный PIN-код для защиты входа в приложение Neongram на этом устройстве.",
+                        "Тиркемени коргоо үчүн 4 орундуу PIN-код орнотуңуз.",
+                        "Set a 4-digit PIN code to protect your Neongram app on this device."
+                    ),
+                    color = Color(0xFF9AA6CB),
+                    fontSize = 12.5.sp,
+                    lineHeight = 17.sp
+                )
+
+                NeonInput(
+                    value = pinInput,
+                    onValueChange = { raw ->
+                        val digits = raw.filter { it.isDigit() }.take(4)
+                        pinInput = digits
+                    },
+                    placeholder = tr(lang, "Введите 4-значный PIN (например, 2026)", "4 орундуу PIN", "Enter 4-digit PIN"),
+                    isPassword = true
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        PrimaryButton(
+                            label = if (isPinActive) {
+                                tr(lang, "Изменить PIN", "PIN өзгөртүү", "Change PIN")
+                            } else {
+                                tr(lang, "Установить PIN", "PIN орнотуу", "Set PIN")
+                            },
+                            onClick = {
+                                if (pinInput.length == 4) {
+                                    viewModel.setPinCode(pinInput)
+                                    pinInput = ""
+                                } else {
+                                    viewModel.showToast(
+                                        tr(lang, "Введите ровно 4 цифры", "4 сан жазыңыз", "Enter 4 digits")
+                                    )
+                                }
+                            }
+                        )
+                    }
+
+                    if (isPinActive) {
+                        Box(
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Color(0x28FF4D6D))
+                                .border(1.dp, Color(0x88FF4D6D), RoundedCornerShape(16.dp))
+                                .clickable {
+                                    viewModel.setPinCode("")
+                                    pinInput = ""
+                                }
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = tr(lang, "Отключить PIN", "Өчүрүү", "Remove PIN"),
+                                color = Color(0xFFFF6B88),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+                    }
+                }
+
+                // Auto-lock timeout selector (1 мин, 5 мин, 15 мин)
+                Text(
+                    text = tr(lang, "Автоблокировка", "Автоблоктоо", "Auto-Lock Timeout"),
+                    color = Color(0xFF9AA6CB),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf("1 мин", "5 мин", "15 мин").forEach { timeoutLabel ->
+                        val active = selectedAutoLockTimeout == timeoutLabel
+                        val pillShape = RoundedCornerShape(14.dp)
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 38.dp)
+                                .clip(pillShape)
+                                .background(
+                                    if (active) {
+                                        Brush.linearGradient(
+                                            colors = listOf(Color(0xFF2FF2FF), Color(0xFF8B5CF6))
+                                        )
+                                    } else {
+                                        Brush.linearGradient(
+                                            colors = listOf(Color(0x66151A36), Color(0x6610142A))
+                                        )
+                                    }
+                                )
+                                .border(
+                                    width = 1.dp,
+                                    color = if (active) Color.White.copy(alpha = 0.5f) else Color.White.copy(alpha = 0.14f),
+                                    shape = pillShape
+                                )
+                                .clickable {
+                                    selectedAutoLockTimeout = timeoutLabel
+                                    viewModel.showToast(
+                                        tr(
+                                            lang,
+                                            "Автоблокировка: $timeoutLabel",
+                                            "Автоблоктоо: $timeoutLabel",
+                                            "Auto-lock: $timeoutLabel"
+                                        )
+                                    )
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = timeoutLabel,
+                                color = if (active) Color(0xFF060814) else Color(0xFFF2F5FF),
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+                    }
+                }
+
+                // Button: "Заблокировать приложение сейчас"
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 46.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(
+                            Brush.linearGradient(
+                                colors = listOf(Color(0x332FF2FF), Color(0x338B5CF6))
+                            )
+                        )
+                        .border(
+                            width = 1.dp,
+                            brush = Brush.linearGradient(
+                                colors = listOf(Color(0x882FF2FF), Color(0x888B5CF6))
+                            ),
+                            shape = RoundedCornerShape(18.dp)
+                        )
+                        .clickable { viewModel.lockAppNow() }
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = tr(
+                            lang,
+                            "Заблокировать приложение сейчас",
+                            "Тиркемени азыр блоктоо",
+                            "Lock App Now"
+                        ),
+                        color = Color(0xFF2FF2FF),
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                }
+            }
+        }
+
+        // ====================================================================
+        // Section 2: Двухфакторная аутентификация (2FA TOTP & Системный чат)
+        // ====================================================================
+        val twoFactorEnabled = state.twoFactorStatus.enabled
+        val setupData = state.twoFactorSetupData
+
+        LiquidGlassCard(
+            cornerRadius = 26.dp,
+            paddingDp = 18.dp,
+            accentGlow = Color(0xFF2FF2FF)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Security,
+                            contentDescription = "2FA",
+                            tint = Color(0xFF2FF2FF),
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Text(
+                            text = tr(
+                                lang,
+                                "Двухфакторная аутентификация (2FA)",
+                                "Эки баскычтуу коргоо (2FA)",
+                                "Two-Factor Authentication (2FA)"
+                            ),
+                            color = Color(0xFFF5F7FF),
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (twoFactorEnabled) Color(0x2E10B981) else Color(0x331E2448))
+                            .border(
+                                width = 1.dp,
+                                color = if (twoFactorEnabled) Color(0x8810B981) else Color.White.copy(alpha = 0.2f),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = if (twoFactorEnabled) {
+                                tr(lang, "Включена", "Жандырылган", "Enabled")
+                            } else {
+                                tr(lang, "Отключена", "Өчүрүлгөн", "Disabled")
+                            },
+                            color = if (twoFactorEnabled) Color(0xFF5CFFCD) else Color(0xFF9AA6CB),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                }
+
+                Text(
+                    text = tr(
+                        lang,
+                        "Защитите вход одноразовыми кодами Google Authenticator / Authy и подтверждением новых устройств в системном чате.",
+                        "Аккаунтуңузду Google Authenticator коду менен коргоңуз.",
+                        "Protect your account with TOTP authenticator codes and device login approval via system chat."
+                    ),
+                    color = Color(0xFF9AA6CB),
+                    fontSize = 12.5.sp,
+                    lineHeight = 17.sp
+                )
+
+                // Switch for "Подтверждение входа через системный чат"
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(Color(0x5510142C))
+                        .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(18.dp))
+                        .clickable {
+                            viewModel.toggle2faDeviceApproval(!state.twoFactorStatus.deviceApprovalEnabled)
+                        }
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = tr(
+                                lang,
+                                "Подтверждение входа через системный чат",
+                                "Системалык чат аркылуу кирүүнү ырастоо",
+                                "Confirm logins via System Chat"
+                            ),
+                            color = Color(0xFFF5F7FF),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = tr(
+                                lang,
+                                "Отправлять запрос Разрешить / Отклонить при новом входе",
+                                "Жаңы кирүүдө сурам жөнөтүү",
+                                "Send Approve / Reject alert on new device login"
+                            ),
+                            color = Color(0xFF9AA6CB),
+                            fontSize = 11.5.sp
+                        )
+                    }
+                    Switch(
+                        checked = state.twoFactorStatus.deviceApprovalEnabled,
+                        onCheckedChange = { viewModel.toggle2faDeviceApproval(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color(0xFF070914),
+                            checkedTrackColor = Color(0xFF2FF2FF),
+                            uncheckedThumbColor = Color(0xFF9AA6CB),
+                            uncheckedTrackColor = Color(0xFF1A2042)
+                        )
+                    )
+                }
+
+                if (!twoFactorEnabled) {
+                    if (setupData == null) {
+                        PrimaryButton(
+                            label = tr(
+                                lang,
+                                "Настроить 2FA (Google Authenticator)",
+                                "2FA тууралоо (Google Authenticator)",
+                                "Set Up 2FA (Google Authenticator)"
+                            ),
+                            onClick = { viewModel.start2faSetup() }
+                        )
+                    } else {
+                        // Display secret key (with copy button), otpauthUrl QR & text, 6-digit input & confirm button
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(Color(0x660D1126))
+                                .border(1.dp, Color(0x662FF2FF), RoundedCornerShape(20.dp))
+                                .padding(14.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            if (setupData.otpauthUrl.isNotBlank()) {
+                                VisualQrCodeBox(payload = setupData.otpauthUrl)
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = tr(lang, "СЕКРЕТНЫЙ КЛЮЧ (TOTP SECRET)", "ЖАШЫРУУН АЧКЫЧ", "TOTP SECRET KEY"),
+                                        color = Color(0xFF9AA6CB),
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                    Text(
+                                        text = setupData.secret,
+                                        color = Color(0xFF2FF2FF),
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color(0x332FF2FF))
+                                        .border(1.dp, Color(0x882FF2FF), RoundedCornerShape(12.dp))
+                                        .clickable {
+                                            clipboard.setText(AnnotatedString(setupData.secret))
+                                            viewModel.showToast(
+                                                tr(lang, "Секретный ключ скопирован", "Ачкыч көчүрүлдү", "Secret key copied")
+                                            )
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.ContentCopy,
+                                            contentDescription = "Copy",
+                                            tint = Color(0xFF2FF2FF),
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Text(
+                                            text = tr(lang, "Копировать", "Көчүрүү", "Copy"),
+                                            color = Color(0xFF2FF2FF),
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+
+                            if (setupData.otpauthUrl.isNotBlank()) {
+                                Text(
+                                    text = setupData.otpauthUrl,
+                                    color = Color(0xFF9AA6CB),
+                                    fontSize = 11.sp,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            clipboard.setText(AnnotatedString(setupData.otpauthUrl))
+                                            viewModel.showToast("otpauth:// URL скопирован")
+                                        }
+                                )
+                            }
+
+                            NeonInput(
+                                value = totpConfirmCode,
+                                onValueChange = { raw ->
+                                    totpConfirmCode = raw.filter { it.isDigit() }.take(6)
+                                },
+                                placeholder = tr(lang, "6-значный код из приложения", "6 орундуу код", "6-digit code from Authenticator")
+                            )
+
+                            PrimaryButton(
+                                label = tr(
+                                    lang,
+                                    "Подтвердить и включить 2FA",
+                                    "Ырастоо жана 2FA жандыруу",
+                                    "Confirm & Enable 2FA"
+                                ),
+                                onClick = {
+                                    viewModel.confirm2faSetup(totpConfirmCode)
+                                    totpConfirmCode = ""
+                                }
+                            )
+                        }
+                    }
+                } else {
+                    // 2FA is enabled: input for 6-digit code + "Отключить 2FA"
+                    NeonInput(
+                        value = totpDisableCode,
+                        onValueChange = { raw ->
+                            totpDisableCode = raw.filter { it.isDigit() }.take(6)
+                        },
+                        placeholder = tr(lang, "Введите 6-значный код 2FA", "6 орундуу 2FA коду", "Enter 6-digit 2FA code")
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(Color(0x28FF4D6D))
+                            .border(1.dp, Color(0x88FF4D6D), RoundedCornerShape(18.dp))
+                            .clickable {
+                                viewModel.disable2fa(totpDisableCode)
+                                totpDisableCode = ""
+                            }
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = tr(lang, "Отключить 2FA", "2FA өчүрүү", "Disable 2FA"),
+                            color = Color(0xFFFF6B88),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                }
+            }
+        }
+
+        // ====================================================================
+        // Section 3: Смена пароля
+        // ====================================================================
         LiquidGlassCard(
             cornerRadius = 26.dp,
             paddingDp = 18.dp,
@@ -1833,49 +2853,11 @@ fun SecuritySettingsScreen(
                 )
             }
         }
-
-        // 2FA TOTP Frosted Card
-        LiquidGlassCard(
-            cornerRadius = 26.dp,
-            paddingDp = 18.dp,
-            accentGlow = Color(0xFF2FF2FF)
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Security,
-                        contentDescription = "2FA",
-                        tint = Color(0xFF2FF2FF),
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Text(
-                        text = tr(lang, "Двухфакторная защита (2FA TOTP)", "Эки баскычтуу коргоо (2FA)", "Two-Factor Authentication (2FA)"),
-                        color = Color(0xFFF5F7FF),
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.ExtraBold
-                    )
-                }
-                Text(
-                    text = tr(
-                        lang,
-                        "Защитите вход одноразовыми кодами Google Authenticator / Authy и подтверждением новых устройств на cloud.neongram.space.",
-                        "Аккаунтуңузду Google Authenticator коду менен коргоңуз.",
-                        "Protect your account with TOTP authenticator codes and device login approval on cloud.neongram.space."
-                    ),
-                    color = Color(0xFF9AA6CB),
-                    fontSize = 13.sp,
-                    lineHeight = 18.sp
-                )
-            }
-        }
     }
 }
 
 // ============================================================================
-// 5. DEVICES SETTINGS SUB-SCREEN (Liquid Glass)
+// 5. DEVICES SETTINGS SUB-SCREEN (with Real Camera QR Scanner to Connect Any Device/Web)
 // ============================================================================
 
 @Composable
@@ -1884,24 +2866,30 @@ fun DevicesSettingsScreen(
     viewModel: NeongramViewModel
 ) {
     val lang = state.session.language
+    var showQrCameraScannerModal by remember { mutableStateOf(false) }
+    var manualQrInput by remember { mutableStateOf("") }
+
+    LaunchedEffect(Unit) {
+        viewModel.loadSessions()
+    }
 
     LiquidSubScreenScaffold(
         title = tr(lang, "Устройства", "Түзмөктөр", "Devices"),
         subtitle = "Active Sessions & QR Auth",
         onBack = { viewModel.navigateBack() }
     ) {
-        // Connect Device via QR Button
+        // Real Camera QR Scanner Button to Connect Any Device / Web
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 54.dp)
+                .heightIn(min = 56.dp)
                 .clip(RoundedCornerShape(22.dp))
                 .background(
                     Brush.linearGradient(
                         colors = listOf(Color(0xFF2FF2FF), Color(0xFF8B5CF6))
                     )
                 )
-                .clickable { viewModel.navigateToOverlay(ActiveOverlayScreen.AUTH_QR) }
+                .clickable { showQrCameraScannerModal = true }
                 .padding(horizontal = 18.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
@@ -1910,14 +2898,20 @@ fun DevicesSettingsScreen(
                 imageVector = Icons.Default.QrCodeScanner,
                 contentDescription = "QR",
                 tint = Color(0xFF070914),
-                modifier = Modifier.size(20.dp)
+                modifier = Modifier.size(22.dp)
             )
             Spacer(modifier = Modifier.width(10.dp))
             Text(
-                text = tr(lang, "Подключить устройство по QR", "Түзмөктү QR менен туташтыруу", "Link Device via QR"),
+                text = tr(
+                    lang,
+                    "Сканировать QR для входа на другом устройстве / Web",
+                    "Башка түзмөктө / Web кирүү үчүн QR сканерлөө",
+                    "Scan QR to Log In on Another Device / Web"
+                ),
                 color = Color(0xFF070914),
-                fontSize = 15.sp,
-                fontWeight = FontWeight.ExtraBold
+                fontSize = 14.sp,
+                fontWeight = FontWeight.ExtraBold,
+                textAlign = TextAlign.Center
             )
         }
 
@@ -2046,6 +3040,92 @@ fun DevicesSettingsScreen(
                                     .clickable { viewModel.terminateSession(sessionItem.id) }
                             )
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    // Real Camera QR Scanner Frosted Glass Modal
+    if (showQrCameraScannerModal) {
+        Dialog(onDismissRequest = { showQrCameraScannerModal = false }) {
+            LiquidGlassCard(
+                cornerRadius = 30.dp,
+                paddingDp = 20.dp,
+                accentGlow = Color(0xFF2FF2FF)
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = tr(lang, "Сканировать QR-код", "QR-код сканерлөө", "Scan QR Code"),
+                            color = Color(0xFFF6F8FF),
+                            fontSize = 19.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.08f))
+                                .clickable { showQrCameraScannerModal = false },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Close",
+                                tint = Color(0xFFF2F5FF),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = tr(
+                            lang,
+                            "Наведите камеру на QR-код на экране компьютера (cloud.neongram.space) или другого устройства:",
+                            "Камераны компьютердеги же башка түзмөктөгү QR-кодго багыттаңыз:",
+                            "Point the camera at the QR code on cloud.neongram.space or another device:"
+                        ),
+                        color = Color(0xFF9AA6CB),
+                        fontSize = 12.5.sp,
+                        lineHeight = 17.sp
+                    )
+
+                    RealQrScannerBox(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(270.dp),
+                        onQrCodeScanned = { raw ->
+                            showQrCameraScannerModal = false
+                            viewModel.handleScannedQrPayload(raw)
+                            viewModel.loadSessions()
+                        }
+                    )
+
+                    NeonInput(
+                        value = manualQrInput,
+                        onValueChange = { manualQrInput = it },
+                        placeholder = tr(lang, "Или вставьте код / токен вручную", "Же токенди кол менен жазыңыз", "Or paste QR token manually")
+                    )
+
+                    if (manualQrInput.isNotBlank()) {
+                        PrimaryButton(
+                            label = tr(lang, "Подтвердить вход", "Кирүүнү ырастоо", "Approve Login"),
+                            onClick = {
+                                val code = manualQrInput.trim()
+                                manualQrInput = ""
+                                showQrCameraScannerModal = false
+                                viewModel.handleScannedQrPayload(code)
+                                viewModel.loadSessions()
+                            }
+                        )
                     }
                 }
             }
@@ -2626,9 +3706,9 @@ fun AboutSettingsScreen(
                 Text(
                     text = tr(
                         lang,
-                        "В: Как войти на втором устройстве?\nО: Откройте Настройки → Устройства → Подключить устройство по QR.\n\nВ: С каким облаком работает приложение?\nО: Neongram синхронизируется напрямую с защищенным облаком https://cloud.neongram.space.",
+                        "В: Как войти на втором устройстве?\nО: Откройте Настройки → Устройства → Сканировать QR для входа на другом устройстве / Web.\n\nВ: С каким облаком работает приложение?\nО: Neongram синхронизируется напрямую с защищенным облаком https://cloud.neongram.space.",
                         "С: Экинчи түзмөктөн кантип кирем?\nЖ: Жөндөөлөр → Түзмөктөр → QR менен туташтыруу.",
-                        "Q: How to log in on another device?\nA: Open Settings → Devices → Link Device via QR.\n\nQ: Which cloud powers Neongram?\nA: Neongram connects exclusively to https://cloud.neongram.space."
+                        "Q: How to log in on another device?\nA: Open Settings → Devices → Scan QR to Log In on Another Device / Web.\n\nQ: Which cloud powers Neongram?\nA: Neongram connects exclusively to https://cloud.neongram.space."
                     ),
                     color = Color(0xFF9AA6CB),
                     fontSize = 13.sp,

@@ -89,4 +89,12 @@ dependencies {
 
     // Coil for async avatars & media
     implementation("io.coil-kt:coil-compose:2.7.0")
+
+    // CameraX & MLKit Barcode Scanning for real QR Login & Contact QR scan
+    val cameraxVersion = "1.4.0"
+    implementation("androidx.camera:camera-core:$cameraxVersion")
+    implementation("androidx.camera:camera-camera2:$cameraxVersion")
+    implementation("androidx.camera:camera-lifecycle:$cameraxVersion")
+    implementation("androidx.camera:camera-view:$cameraxVersion")
+    implementation("com.google.mlkit:barcode-scanning:17.3.0")
 }

@@ -1,10 +1,23 @@
 package space.neongram.app.ui
 
 import android.app.Application
+import android.content.ContentUris
+import android.net.Uri
+import android.provider.MediaStore
+import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import space.neongram.app.core.model.*
 import space.neongram.app.core.network.NeongramApi
 import space.neongram.app.core.network.SocketManager
@@ -39,13 +52,22 @@ data class NeongramUiState(
     val pinnedMessages: List<MessageDto> = emptyList(),
     val replyToMessage: MessageDto? = null,
     val editingMessage: MessageDto? = null,
+    val forwardingMessage: MessageDto? = null,
     val searchResults: List<UserDto> = emptyList(),
     val peerProfileUser: UserDto? = null,
     val myStories: List<StoryDto> = emptyList(),
     val activeSessions: List<SessionItemDto> = emptyList(),
     val currentSessionId: String? = null,
     val qrAuthToken: String = "",
+    val qrAuthStatus: String = "pending",
+    val qrApprovedBy: UserDto? = null,
     val twoFactorChallengeId: String? = null,
+    val twoFactorStatus: TwoFactorStatusResponse = TwoFactorStatusResponse(),
+    val twoFactorSetupData: TwoFactorSetupResponse? = null,
+    val blockedUsers: List<BlockedUserEntryDto> = emptyList(),
+    val devicePhotos: List<DevicePhotoItem> = emptyList(),
+    val isAppLocked: Boolean = false,
+    val chatFolderFilter: String = "ALL",
     val aiModel: String = "fast",
     val aiMode: String = "default",
     val weatherData: WeatherForecastData = WeatherForecastData(),
@@ -62,6 +84,11 @@ class NeongramViewModel(application: Application) : AndroidViewModel(application
     private val sessionStore = SessionStore(application)
     private val api = NeongramApi()
     private val socketManager = SocketManager()
+    private val jsonParser = Json { ignoreUnknownKeys = true; isLenient = true }
+
+    private val messagesCache = mutableMapOf<String, List<MessageDto>>()
+    private var qrPollingJob: Job? = null
+    private var initialPinLockChecked = false
 
     private val _uiState = MutableStateFlow(NeongramUiState())
     val uiState: StateFlow<NeongramUiState> = _uiState.asStateFlow()
@@ -70,8 +97,18 @@ class NeongramViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             sessionStore.sessionFlow.collect { stored ->
                 api.baseUrl = "https://cloud.neongram.space"
-                _uiState.update { it.copy(session = stored) }
+                val shouldLockOnStart = !initialPinLockChecked && stored.isAuthenticated && stored.pinCode.isNotBlank()
                 if (stored.isAuthenticated) {
+                    initialPinLockChecked = true
+                }
+                _uiState.update { state ->
+                    state.copy(
+                        session = stored,
+                        isAppLocked = if (shouldLockOnStart) true else if (stored.pinCode.isBlank()) false else state.isAppLocked
+                    )
+                }
+                if (stored.isAuthenticated) {
+                    qrPollingJob?.cancel()
                     socketManager.connect(api.baseUrl, stored.accessToken)
                     refreshAll()
                 } else {
@@ -82,7 +119,8 @@ class NeongramViewModel(application: Application) : AndroidViewModel(application
                             chats = emptyList(),
                             activeChat = null,
                             messages = emptyList(),
-                            overlayScreen = ActiveOverlayScreen.NONE
+                            isAppLocked = false,
+                            overlayScreen = if (it.overlayScreen == ActiveOverlayScreen.AUTH_QR) ActiveOverlayScreen.AUTH_QR else ActiveOverlayScreen.NONE
                         )
                     }
                 }
@@ -97,6 +135,10 @@ class NeongramViewModel(application: Application) : AndroidViewModel(application
 
         viewModelScope.launch {
             socketManager.incomingMessages.collect { incoming ->
+                val cachedList = messagesCache[incoming.chatId].orEmpty()
+                if (cachedList.none { it.id == incoming.id }) {
+                    messagesCache[incoming.chatId] = cachedList + incoming
+                }
                 val currentChatId = _uiState.value.activeChat?.id
                 if (currentChatId == incoming.chatId) {
                     _uiState.update { state ->
@@ -137,6 +179,10 @@ class NeongramViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             sessionStore.setLanguage(lang)
         }
+    }
+
+    fun setChatFolderFilter(folder: String) {
+        _uiState.update { it.copy(chatFolderFilter = folder) }
     }
 
     fun setAiModel(model: String) {
@@ -208,18 +254,30 @@ class NeongramViewModel(application: Application) : AndroidViewModel(application
         when (screen) {
             ActiveOverlayScreen.AUTH_QR -> generateQrLoginToken()
             ActiveOverlayScreen.SETTINGS_DEVICES -> loadSessions()
+            ActiveOverlayScreen.SETTINGS_SECURITY -> load2faStatus()
+            ActiveOverlayScreen.SETTINGS_PRIVACY -> loadBlockedUsers()
             else -> {}
         }
     }
 
     fun navigateBack() {
         val current = _uiState.value.overlayScreen
+        if (current == ActiveOverlayScreen.AUTH_QR) {
+            qrPollingJob?.cancel()
+        }
         val next = when (current) {
             ActiveOverlayScreen.GROUP_INFO -> ActiveOverlayScreen.CHAT_ROOM
             ActiveOverlayScreen.PEER_PROFILE -> if (_uiState.value.activeChat != null) ActiveOverlayScreen.CHAT_ROOM else ActiveOverlayScreen.NONE
             ActiveOverlayScreen.SETTINGS_ACCOUNT_INFO -> ActiveOverlayScreen.SETTINGS_ACCOUNT
             ActiveOverlayScreen.CHAT_ROOM -> {
-                _uiState.update { it.copy(activeChat = null, messages = emptyList(), replyToMessage = null, editingMessage = null) }
+                _uiState.update {
+                    it.copy(
+                        activeChat = null,
+                        messages = emptyList(),
+                        replyToMessage = null,
+                        editingMessage = null
+                    )
+                }
                 refreshChats()
                 ActiveOverlayScreen.NONE
             }
@@ -337,9 +395,54 @@ class NeongramViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun generateQrLoginToken() {
+        qrPollingJob?.cancel()
         viewModelScope.launch {
+            _uiState.update { it.copy(qrAuthStatus = "pending", qrApprovedBy = null) }
             api.startAuthQr().onSuccess { resp ->
-                _uiState.update { it.copy(qrAuthToken = resp.token) }
+                val token = resp.token
+                _uiState.update { it.copy(qrAuthToken = token, qrAuthStatus = "pending", qrApprovedBy = null) }
+                if (token.isNotBlank() && !_uiState.value.session.isAuthenticated) {
+                    startQrPolling(token)
+                }
+            }
+        }
+    }
+
+    private fun startQrPolling(token: String) {
+        qrPollingJob?.cancel()
+        qrPollingJob = viewModelScope.launch {
+            while (isActive && _uiState.value.overlayScreen == ActiveOverlayScreen.AUTH_QR && !_uiState.value.session.isAuthenticated) {
+                delay(2000L)
+                api.checkAuthQrStatus(token).onSuccess { statusResp ->
+                    val st = statusResp.status.lowercase()
+                    _uiState.update {
+                        it.copy(
+                            qrAuthStatus = st,
+                            qrApprovedBy = statusResp.approvedBy ?: statusResp.user ?: it.qrApprovedBy
+                        )
+                    }
+                    if (st == "approved") {
+                        api.finalizeAuthQr(token).onSuccess { authResp ->
+                            val accessToken = authResp.accessToken.orEmpty()
+                            val user = authResp.user
+                            if (accessToken.isNotBlank() && user != null) {
+                                _uiState.update { it.copy(overlayScreen = ActiveOverlayScreen.NONE) }
+                                sessionStore.saveSession(
+                                    accessToken = accessToken,
+                                    refreshToken = authResp.refreshToken.orEmpty(),
+                                    userId = user.id,
+                                    username = user.username,
+                                    displayName = user.effectiveName,
+                                    serverUrl = api.baseUrl
+                                )
+                                showToast("Вход по QR выполнен")
+                            }
+                        }
+                        break
+                    } else if (st == "expired") {
+                        break
+                    }
+                }
             }
         }
     }
@@ -357,6 +460,81 @@ class NeongramViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun handleScannedQrPayload(raw: String) {
+        val trimmed = raw.trim()
+        if (trimmed.isBlank()) return
+        val accessToken = _uiState.value.session.accessToken
+
+        // 1. JSON payload check ("neongram_login" or "neongram_web_connect")
+        if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+            val parsedObj = runCatching { jsonParser.parseToJsonElement(trimmed).jsonObject }.getOrNull()
+            if (parsedObj != null) {
+                val type = parsedObj["type"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                val token = parsedObj["token"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                val username = parsedObj["username"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                if (type == "neongram_login" && token.isNotBlank()) {
+                    approveQrToken(token)
+                    return
+                }
+                if (type == "neongram_web_connect" && token.isNotBlank()) {
+                    if (accessToken.isNotBlank()) {
+                        viewModelScope.launch {
+                            api.confirmDeviceQr(accessToken, token).onSuccess { ok ->
+                                showToast(if (ok) "Устройство подключено" else "Не удалось подключить устройство")
+                            }
+                        }
+                    }
+                    return
+                }
+                if (username.isNotBlank()) {
+                    addContactByLogin(username)
+                    return
+                }
+            }
+        }
+
+        // 2. neongram://login/<token>
+        if (trimmed.startsWith("neongram://login/", ignoreCase = true)) {
+            val token = trimmed.substringAfter("neongram://login/", "").trim()
+            if (token.isNotBlank()) {
+                approveQrToken(token)
+                return
+            }
+        }
+
+        // 3. neongram://user/<username> or neongram://contact/<username> or /u/<username> or @username
+        when {
+            trimmed.startsWith("neongram://user/", ignoreCase = true) -> {
+                val u = trimmed.substringAfter("neongram://user/").substringBefore("?").trim('/')
+                if (u.isNotBlank()) addContactByLogin(u)
+                return
+            }
+            trimmed.startsWith("neongram://contact/", ignoreCase = true) -> {
+                val u = trimmed.substringAfter("neongram://contact/").substringBefore("?").trim('/')
+                if (u.isNotBlank()) addContactByLogin(u)
+                return
+            }
+            trimmed.contains("/u/", ignoreCase = true) -> {
+                val u = trimmed.substringAfter("/u/").substringBefore("?").trim('/')
+                if (u.isNotBlank()) addContactByLogin(u)
+                return
+            }
+            trimmed.startsWith("@") && trimmed.length >= 4 -> {
+                addContactByLogin(trimmed.removePrefix("@"))
+                return
+            }
+        }
+
+        // 4. Otherwise if 16+ hex/alphanumeric token -> approveQrToken
+        if (trimmed.length >= 16 && trimmed.all { it.isLetterOrDigit() || it == '-' || it == '_' }) {
+            approveQrToken(trimmed)
+        } else if (trimmed.length in 3..32 && trimmed.all { it.isLetterOrDigit() || it == '_' || it == '.' }) {
+            addContactByLogin(trimmed)
+        } else {
+            showToast("Неизвестный формат QR-кода")
+        }
+    }
+
     fun refreshAll() {
         val token = _uiState.value.session.accessToken
         val userId = _uiState.value.session.userId
@@ -371,6 +549,8 @@ class NeongramViewModel(application: Application) : AndroidViewModel(application
                 }
             }
             refreshChats()
+            load2faStatus()
+            loadBlockedUsers()
         }
     }
 
@@ -379,33 +559,53 @@ class NeongramViewModel(application: Application) : AndroidViewModel(application
         if (token.isBlank()) return
         viewModelScope.launch {
             api.getChats(token).onSuccess { list ->
-                _uiState.update { it.copy(chats = list) }
+                list.forEach { chat ->
+                    if (chat.messages.isNotEmpty() && messagesCache[chat.id].isNullOrEmpty()) {
+                        messagesCache[chat.id] = chat.messages
+                    }
+                }
+                val activeId = _uiState.value.activeChat?.id
+                val updatedActive = if (activeId != null) list.firstOrNull { it.id == activeId } ?: _uiState.value.activeChat else null
+                _uiState.update { it.copy(chats = list, activeChat = updatedActive) }
             }
         }
     }
 
     fun openChat(chat: ChatDto) {
         val token = _uiState.value.session.accessToken
+        val immediateMessages = messagesCache[chat.id]?.takeIf { it.isNotEmpty() } ?: chat.messages
+        if (immediateMessages.isNotEmpty()) {
+            messagesCache[chat.id] = immediateMessages
+        }
         _uiState.update {
             it.copy(
                 activeChat = chat,
-                messages = emptyList(),
+                messages = immediateMessages,
                 pinnedMessages = emptyList(),
                 replyToMessage = null,
                 editingMessage = null,
-                isLoading = true,
+                isLoading = false,
                 overlayScreen = ActiveOverlayScreen.CHAT_ROOM
             )
         }
         socketManager.joinChatRoom(chat.id)
         viewModelScope.launch {
             api.getChatMessages(token, chat.id).onSuccess { list ->
-                _uiState.update { it.copy(messages = list, isLoading = false) }
+                messagesCache[chat.id] = list
+                _uiState.update { state ->
+                    if (state.activeChat?.id == chat.id) {
+                        state.copy(messages = list, isLoading = false)
+                    } else {
+                        state
+                    }
+                }
             }.onFailure { err ->
                 _uiState.update { it.copy(errorMessage = err.message, isLoading = false) }
             }
             api.getPinnedMessages(token, chat.id).onSuccess { pins ->
-                _uiState.update { it.copy(pinnedMessages = pins) }
+                _uiState.update { state ->
+                    if (state.activeChat?.id == chat.id) state.copy(pinnedMessages = pins) else state
+                }
             }
         }
     }
@@ -440,6 +640,28 @@ class NeongramViewModel(application: Application) : AndroidViewModel(application
         _uiState.update { it.copy(editingMessage = msg, replyToMessage = null) }
     }
 
+    fun setForwardTarget(msg: MessageDto?) {
+        _uiState.update { it.copy(forwardingMessage = msg) }
+    }
+
+    fun forwardMessageToChat(targetChat: ChatDto) {
+        val msg = _uiState.value.forwardingMessage ?: return
+        val token = _uiState.value.session.accessToken
+        if (token.isBlank()) return
+        _uiState.update { it.copy(forwardingMessage = null) }
+        viewModelScope.launch {
+            api.forwardMessage(token, msg.id, targetChat.id).onSuccess { forwarded ->
+                val cached = messagesCache[targetChat.id].orEmpty()
+                messagesCache[targetChat.id] = cached + forwarded
+                showToast("Сообщение переслано")
+                openChat(targetChat)
+                refreshChats()
+            }.onFailure { err ->
+                showToast(err.message ?: "Не удалось переслать сообщение")
+            }
+        }
+    }
+
     fun sendMessage(text: String) {
         val content = text.trim()
         val chat = _uiState.value.activeChat ?: return
@@ -450,10 +672,12 @@ class NeongramViewModel(application: Application) : AndroidViewModel(application
         if (editing != null) {
             viewModelScope.launch {
                 api.editMessage(token, editing.id, content).onSuccess { updated ->
+                    val updatedList = _uiState.value.messages.map { if (it.id == updated.id) updated else it }
+                    messagesCache[chat.id] = updatedList
                     _uiState.update { state ->
                         state.copy(
                             editingMessage = null,
-                            messages = state.messages.map { if (it.id == updated.id) updated else it }
+                            messages = updatedList
                         )
                     }
                 }
@@ -468,11 +692,157 @@ class NeongramViewModel(application: Application) : AndroidViewModel(application
             api.sendMessage(token, chat.id, content, replyId).onSuccess { sent ->
                 _uiState.update { state ->
                     val exists = state.messages.any { it.id == sent.id }
-                    if (exists) state else state.copy(messages = state.messages + sent)
+                    val newList = if (exists) state.messages else state.messages + sent
+                    messagesCache[chat.id] = newList
+                    if (exists) state else state.copy(messages = newList)
                 }
                 refreshChats()
             }.onFailure { err ->
                 _uiState.update { it.copy(errorMessage = err.message) }
+            }
+        }
+    }
+
+    fun loadDevicePhotos() {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val resolver = getApplication<Application>().contentResolver
+                val projection = arrayOf(
+                    MediaStore.Images.Media._ID,
+                    MediaStore.Images.Media.DISPLAY_NAME,
+                    MediaStore.Images.Media.DATE_ADDED,
+                    MediaStore.Images.Media.MIME_TYPE
+                )
+                val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
+                val items = mutableListOf<DevicePhotoItem>()
+                resolver.query(
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    projection,
+                    null,
+                    null,
+                    sortOrder
+                )?.use { cursor ->
+                    val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+                    val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
+                    val dateCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
+                    val mimeCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.MIME_TYPE)
+                    while (cursor.moveToNext() && items.size < 60) {
+                        val id = cursor.getLong(idCol)
+                        val name = cursor.getString(nameCol) ?: "photo_$id.jpg"
+                        val dateAdded = cursor.getLong(dateCol)
+                        val mime = cursor.getString(mimeCol) ?: "image/jpeg"
+                        val contentUri = ContentUris.withAppendedId(
+                            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                            id
+                        )
+                        items.add(
+                            DevicePhotoItem(
+                                uriString = contentUri.toString(),
+                                displayName = name,
+                                dateAdded = dateAdded,
+                                mimeType = mime
+                            )
+                        )
+                    }
+                }
+                _uiState.update { it.copy(devicePhotos = items) }
+            }
+        }
+    }
+
+    fun sendMediaFromUri(uri: Uri, type: String = "PHOTO", caption: String = "") {
+        val chat = _uiState.value.activeChat ?: return
+        val token = _uiState.value.session.accessToken
+        if (token.isBlank()) return
+        val replyId = _uiState.value.replyToMessage?.id
+        _uiState.update { it.copy(replyToMessage = null) }
+
+        viewModelScope.launch {
+            val mediaPayload = withContext(Dispatchers.IO) {
+                runCatching {
+                    val resolver = getApplication<Application>().contentResolver
+                    val mimeType = resolver.getType(uri) ?: when (type.uppercase()) {
+                        "VIDEO" -> "video/mp4"
+                        "VOICE", "AUDIO" -> "audio/ogg"
+                        "PHOTO" -> "image/jpeg"
+                        else -> "application/octet-stream"
+                    }
+                    var fileName = "upload_${System.currentTimeMillis()}"
+                    resolver.query(uri, null, null, null, null)?.use { cursor ->
+                        val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        if (nameIndex >= 0 && cursor.moveToFirst()) {
+                            fileName = cursor.getString(nameIndex) ?: fileName
+                        }
+                    }
+                    val bytes = resolver.openInputStream(uri)?.use { it.readBytes() }
+                        ?: throw IllegalStateException("Не удалось прочитать файл")
+                    Triple(bytes, fileName, mimeType)
+                }
+            }
+
+            mediaPayload.onSuccess { (bytes, fileName, mimeType) ->
+                val resolvedType = when {
+                    type.uppercase() != "AUTO" -> type.uppercase()
+                    mimeType.startsWith("image/") -> "PHOTO"
+                    mimeType.startsWith("video/") -> "VIDEO"
+                    mimeType.startsWith("audio/") -> "AUDIO"
+                    else -> "DOCUMENT"
+                }
+                api.sendMediaMessage(
+                    accessToken = token,
+                    chatId = chat.id,
+                    bytes = bytes,
+                    fileName = fileName,
+                    mimeType = mimeType,
+                    type = resolvedType,
+                    content = caption.trim().takeIf { it.isNotBlank() },
+                    replyToId = replyId
+                ).onSuccess { sent ->
+                    _uiState.update { state ->
+                        val exists = state.messages.any { it.id == sent.id }
+                        val newList = if (exists) state.messages else state.messages + sent
+                        messagesCache[chat.id] = newList
+                        if (exists) state else state.copy(messages = newList)
+                    }
+                    refreshChats()
+                }.onFailure { err ->
+                    showToast(err.message ?: "Ошибка отправки файла")
+                }
+            }.onFailure { err ->
+                showToast(err.message ?: "Не удалось открыть файл")
+            }
+        }
+    }
+
+    fun uploadMyAvatarFromUri(uri: Uri) {
+        val token = _uiState.value.session.accessToken
+        if (token.isBlank()) return
+        viewModelScope.launch {
+            val payload = withContext(Dispatchers.IO) {
+                runCatching {
+                    val resolver = getApplication<Application>().contentResolver
+                    val mimeType = resolver.getType(uri) ?: "image/jpeg"
+                    var fileName = "avatar_${System.currentTimeMillis()}.jpg"
+                    resolver.query(uri, null, null, null, null)?.use { cursor ->
+                        val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        if (nameIndex >= 0 && cursor.moveToFirst()) {
+                            fileName = cursor.getString(nameIndex) ?: fileName
+                        }
+                    }
+                    val bytes = resolver.openInputStream(uri)?.use { it.readBytes() }
+                        ?: throw IllegalStateException("Не удалось прочитать изображение")
+                    Triple(bytes, fileName, mimeType)
+                }
+            }
+            payload.onSuccess { (bytes, fileName, mimeType) ->
+                api.uploadAvatar(token, bytes, fileName, mimeType).onSuccess { updatedUser ->
+                    _uiState.update { it.copy(currentUser = updatedUser) }
+                    showToast("Аватар обновлен")
+                }.onFailure { err ->
+                    showToast(err.message ?: "Ошибка загрузки аватара")
+                }
+            }.onFailure { err ->
+                showToast(err.message ?: "Не удалось выбрать изображение")
             }
         }
     }
@@ -482,8 +852,10 @@ class NeongramViewModel(application: Application) : AndroidViewModel(application
         val chat = _uiState.value.activeChat ?: return
         viewModelScope.launch {
             api.deleteMessageForEveryone(token, messageId).onSuccess {
+                val filtered = _uiState.value.messages.filterNot { it.id == messageId }
+                messagesCache[chat.id] = filtered
                 _uiState.update { state ->
-                    state.copy(messages = state.messages.filterNot { it.id == messageId })
+                    state.copy(messages = filtered)
                 }
                 refreshChats()
             }
@@ -496,6 +868,7 @@ class NeongramViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             api.toggleReaction(token, messageId, emoji).onSuccess {
                 api.getChatMessages(token, chat.id).onSuccess { list ->
+                    messagesCache[chat.id] = list
                     _uiState.update { it.copy(messages = list) }
                 }
             }
@@ -545,6 +918,7 @@ class NeongramViewModel(application: Application) : AndroidViewModel(application
         val token = _uiState.value.session.accessToken
         viewModelScope.launch {
             api.clearChatForEveryone(token, chatId).onSuccess {
+                messagesCache.remove(chatId)
                 _uiState.update { state ->
                     if (state.activeChat?.id == chatId) state.copy(messages = emptyList()) else state
                 }
@@ -558,6 +932,7 @@ class NeongramViewModel(application: Application) : AndroidViewModel(application
         val token = _uiState.value.session.accessToken
         viewModelScope.launch {
             api.deleteChatForEveryone(token, chatId).onSuccess {
+                messagesCache.remove(chatId)
                 if (_uiState.value.activeChat?.id == chatId) {
                     navigateBack()
                 }
@@ -617,6 +992,263 @@ class NeongramViewModel(application: Application) : AndroidViewModel(application
                 openChat(chat)
             }.onFailure { err ->
                 showToast(err.message ?: "Не удалось создать группу")
+            }
+        }
+    }
+
+    fun addMemberToActiveGroup(username: String) {
+        val token = _uiState.value.session.accessToken
+        val group = _uiState.value.activeChat ?: return
+        if (token.isBlank() || username.isBlank()) return
+        viewModelScope.launch {
+            api.findUserByUsername(token, username).onSuccess { user ->
+                api.addGroupMembers(token, group.id, listOf(user.id)).onSuccess { ok ->
+                    if (ok) {
+                        refreshChats()
+                        showToast("${user.effectiveName} добавлен(а) в группу")
+                    } else {
+                        showToast("Не удалось добавить участника")
+                    }
+                }
+            }.onFailure { err ->
+                showToast(err.message ?: "Пользователь не найден")
+            }
+        }
+    }
+
+    fun removeMemberFromActiveGroup(userId: String) {
+        val token = _uiState.value.session.accessToken
+        val group = _uiState.value.activeChat ?: return
+        if (token.isBlank() || userId.isBlank()) return
+        viewModelScope.launch {
+            api.removeGroupMember(token, group.id, userId).onSuccess { ok ->
+                if (ok) {
+                    refreshChats()
+                    showToast("Участник удален из группы")
+                }
+            }
+        }
+    }
+
+    fun setMemberRoleInActiveGroup(userId: String, role: String) {
+        val token = _uiState.value.session.accessToken
+        val group = _uiState.value.activeChat ?: return
+        if (token.isBlank() || userId.isBlank()) return
+        viewModelScope.launch {
+            api.setGroupMemberRole(token, group.id, userId, role).onSuccess { ok ->
+                if (ok) {
+                    refreshChats()
+                    showToast("Роль участника обновлена: $role")
+                }
+            }
+        }
+    }
+
+    fun muteMemberInActiveGroup(userId: String, duration: String = "1h") {
+        val token = _uiState.value.session.accessToken
+        val group = _uiState.value.activeChat ?: return
+        if (token.isBlank() || userId.isBlank()) return
+        viewModelScope.launch {
+            api.muteGroupMember(token, group.id, userId, duration).onSuccess { ok ->
+                if (ok) {
+                    refreshChats()
+                    showToast("Ограничение обновлено ($duration)")
+                }
+            }
+        }
+    }
+
+    fun updateActiveGroupSettings(
+        title: String? = null,
+        isPrivate: Boolean? = null,
+        joinApproval: Boolean? = null
+    ) {
+        val token = _uiState.value.session.accessToken
+        val group = _uiState.value.activeChat ?: return
+        if (token.isBlank()) return
+        viewModelScope.launch {
+            api.updateGroupSettings(token, group.id, title, isPrivate, joinApproval).onSuccess { updatedGroup ->
+                _uiState.update { it.copy(activeChat = updatedGroup) }
+                refreshChats()
+                showToast("Настройки группы сохранены")
+            }.onFailure { err ->
+                showToast(err.message ?: "Не удалось обновить группу")
+            }
+        }
+    }
+
+    fun refreshActiveGroupInviteLink() {
+        val token = _uiState.value.session.accessToken
+        val group = _uiState.value.activeChat ?: return
+        if (token.isBlank()) return
+        viewModelScope.launch {
+            api.refreshGroupInviteLink(token, group.id).onSuccess { updatedGroup ->
+                _uiState.update { it.copy(activeChat = updatedGroup) }
+                refreshChats()
+                showToast("Пригласительная ссылка обновлена")
+            }
+        }
+    }
+
+    fun leaveActiveGroup() {
+        val token = _uiState.value.session.accessToken
+        val group = _uiState.value.activeChat ?: return
+        if (token.isBlank()) return
+        viewModelScope.launch {
+            api.leaveGroup(token, group.id).onSuccess { ok ->
+                if (ok) {
+                    messagesCache.remove(group.id)
+                    _uiState.update { it.copy(activeChat = null, overlayScreen = ActiveOverlayScreen.NONE) }
+                    refreshChats()
+                    showToast("Вы покинули группу")
+                }
+            }
+        }
+    }
+
+    fun load2faStatus() {
+        val token = _uiState.value.session.accessToken
+        if (token.isBlank()) return
+        viewModelScope.launch {
+            api.get2faStatus(token).onSuccess { st ->
+                _uiState.update { it.copy(twoFactorStatus = st) }
+            }
+        }
+    }
+
+    fun start2faSetup() {
+        val token = _uiState.value.session.accessToken
+        if (token.isBlank()) return
+        viewModelScope.launch {
+            api.start2faSetup(token).onSuccess { setupData ->
+                _uiState.update { it.copy(twoFactorSetupData = setupData) }
+            }.onFailure { err ->
+                showToast(err.message ?: "Не удалось начать настройку 2FA")
+            }
+        }
+    }
+
+    fun confirm2faSetup(code: String) {
+        val token = _uiState.value.session.accessToken
+        if (token.isBlank() || code.trim().length < 6) {
+            showToast("Введите 6-значный код из приложения")
+            return
+        }
+        viewModelScope.launch {
+            api.confirm2faSetup(token, code.trim()).onSuccess { st ->
+                _uiState.update { it.copy(twoFactorStatus = st, twoFactorSetupData = null) }
+                showToast("Двухфакторная защита (2FA) включена")
+            }.onFailure { err ->
+                showToast(err.message ?: "Неверный код подтверждения")
+            }
+        }
+    }
+
+    fun disable2fa(code: String) {
+        val token = _uiState.value.session.accessToken
+        if (token.isBlank() || code.trim().length < 6) {
+            showToast("Введите 6-значный код для отключения 2FA")
+            return
+        }
+        viewModelScope.launch {
+            api.disable2fa(token, code.trim()).onSuccess { st ->
+                _uiState.update { it.copy(twoFactorStatus = st, twoFactorSetupData = null) }
+                showToast("2FA отключена")
+            }.onFailure { err ->
+                showToast(err.message ?: "Неверный 2FA код")
+            }
+        }
+    }
+
+    fun toggle2faDeviceApproval(enabled: Boolean) {
+        val token = _uiState.value.session.accessToken
+        if (token.isBlank()) return
+        viewModelScope.launch {
+            api.set2faDeviceApproval(token, enabled).onSuccess { st ->
+                _uiState.update { it.copy(twoFactorStatus = st) }
+                showToast(if (enabled) "Подтверждение входа с устройства включено" else "Подтверждение входа отключено")
+            }
+        }
+    }
+
+    fun setPinCode(pin: String) {
+        viewModelScope.launch {
+            val clean = pin.trim()
+            sessionStore.setPinCode(clean)
+            if (clean.isBlank()) {
+                _uiState.update { it.copy(isAppLocked = false) }
+                showToast("PIN-код отключен")
+            } else {
+                showToast("PIN-код установлен")
+            }
+        }
+    }
+
+    fun unlockWithPin(pin: String): Boolean {
+        val storedPin = _uiState.value.session.pinCode
+        return if (storedPin.isBlank() || pin.trim() == storedPin) {
+            _uiState.update { it.copy(isAppLocked = false) }
+            true
+        } else {
+            showToast("Неверный PIN-код")
+            false
+        }
+    }
+
+    fun lockAppNow() {
+        if (_uiState.value.session.pinCode.isNotBlank()) {
+            _uiState.update { it.copy(isAppLocked = true) }
+        } else {
+            showToast("Сначала установите PIN-код в разделе Безопасность")
+        }
+    }
+
+    fun loadBlockedUsers() {
+        val token = _uiState.value.session.accessToken
+        if (token.isBlank()) return
+        viewModelScope.launch {
+            api.listBlockedUsers(token).onSuccess { list ->
+                _uiState.update { it.copy(blockedUsers = list) }
+            }
+        }
+    }
+
+    fun blockUser(userId: String) {
+        val token = _uiState.value.session.accessToken
+        if (token.isBlank() || userId.isBlank()) return
+        viewModelScope.launch {
+            api.blockUser(token, userId).onSuccess { ok ->
+                if (ok) {
+                    loadBlockedUsers()
+                    showToast("Пользователь заблокирован")
+                }
+            }
+        }
+    }
+
+    fun unblockUser(userId: String) {
+        val token = _uiState.value.session.accessToken
+        if (token.isBlank() || userId.isBlank()) return
+        viewModelScope.launch {
+            api.unblockUser(token, userId).onSuccess { ok ->
+                if (ok) {
+                    loadBlockedUsers()
+                    showToast("Пользователь разблокирован")
+                }
+            }
+        }
+    }
+
+    fun reportTarget(targetId: String, targetType: String, reason: String, comment: String = "") {
+        val token = _uiState.value.session.accessToken
+        if (token.isBlank()) return
+        viewModelScope.launch {
+            api.reportTarget(token, targetId, targetType, reason, comment).onSuccess { ok ->
+                if (ok) {
+                    showToast("Жалоба отправлена модераторам Neongram")
+                } else {
+                    showToast("Не удалось отправить жалобу")
+                }
             }
         }
     }
@@ -764,6 +1396,8 @@ class NeongramViewModel(application: Application) : AndroidViewModel(application
 
     fun logout() {
         viewModelScope.launch {
+            qrPollingJob?.cancel()
+            messagesCache.clear()
             socketManager.disconnect()
             sessionStore.clearSession()
         }

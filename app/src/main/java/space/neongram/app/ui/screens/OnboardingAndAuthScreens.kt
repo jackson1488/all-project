@@ -80,6 +80,7 @@ import space.neongram.app.core.ui.LocalNeonScheme
 import space.neongram.app.core.ui.NeonInput
 import space.neongram.app.core.ui.PageScaffold
 import space.neongram.app.core.ui.PrimaryButton
+import space.neongram.app.core.ui.RealQrScannerBox
 import space.neongram.app.core.ui.tr
 import space.neongram.app.ui.NeongramUiState
 import kotlin.math.abs
@@ -1937,6 +1938,56 @@ fun AuthQrScreen(
                     }
                 }
 
+                // Live polling status pill
+                val isApproved = state.qrApprovedBy != null
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(
+                            if (isApproved) {
+                                Color(0xFF10B981).copy(alpha = 0.16f)
+                            } else {
+                                Color.White.copy(alpha = 0.06f)
+                            }
+                        )
+                        .border(
+                            width = 1.dp,
+                            color = if (isApproved) {
+                                Color(0xFF10B981).copy(alpha = 0.45f)
+                            } else {
+                                cyanNeon.copy(alpha = 0.30f)
+                            },
+                            shape = RoundedCornerShape(18.dp)
+                        )
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(9.dp)
+                            .clip(CircleShape)
+                            .background(if (isApproved) Color(0xFF10B981) else cyanNeon)
+                    )
+                    Text(
+                        text = if (isApproved) {
+                            "Подтверждено: @${state.qrApprovedBy?.username}"
+                        } else {
+                            tr(
+                                lang,
+                                "Ожидание сканирования вторым устройством • Авто-вход активен",
+                                "Экинчи түзмөк аркылуу скандоо күтүлүүдө • Авто-кирүү активдүү",
+                                "Ожидание сканирования вторым устройством • Авто-вход активен"
+                            )
+                        },
+                        color = if (isApproved) Color(0xFF6EE7B7) else Color(0xFFE2E8F0),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        lineHeight = 16.sp
+                    )
+                }
+
                 if (qrPayload.isNotBlank()) {
                     Box(
                         modifier = Modifier
@@ -2019,73 +2070,16 @@ fun AuthQrScreen(
                     lineHeight = 20.sp
                 )
 
-                // Liquid Glass Camera Scanner Viewport
-                Box(
+                // Real CameraX + ML Kit QR Scanner Box
+                RealQrScannerBox(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(268.dp)
-                        .clip(RoundedCornerShape(24.dp))
-                        .background(Color(0xFF070614))
-                        .border(
-                            width = 1.2.dp,
-                            brush = Brush.linearGradient(
-                                colors = listOf(
-                                    cyanNeon.copy(alpha = 0.45f),
-                                    violetNeon.copy(alpha = 0.35f)
-                                )
-                            ),
-                            shape = RoundedCornerShape(24.dp)
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Canvas(modifier = Modifier.fillMaxSize()) {
-                        val step = 28.dp.toPx()
-                        val gridColor = cyanNeon.copy(alpha = 0.08f)
-                        var x = 0f
-                        while (x < size.width) {
-                            drawLine(gridColor, Offset(x, 0f), Offset(x, size.height), strokeWidth = 1f)
-                            x += step
-                        }
-                        var y = 0f
-                        while (y < size.height) {
-                            drawLine(gridColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
-                            y += step
-                        }
+                        .height(280.dp),
+                    onQrCodeScanned = { raw ->
+                        scannedTokenInput = raw
+                        onApproveToken(raw)
                     }
-
-                    Box(
-                        modifier = Modifier
-                            .size(210.dp)
-                            .clip(RoundedCornerShape(28.dp))
-                            .background(Color.White.copy(alpha = 0.03f))
-                            .border(
-                                width = 2.dp,
-                                brush = Brush.linearGradient(
-                                    colors = listOf(cyanNeon, violetNeon)
-                                ),
-                                shape = RoundedCornerShape(28.dp)
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.QrCodeScanner,
-                                contentDescription = null,
-                                tint = cyanNeon,
-                                modifier = Modifier.size(46.dp)
-                            )
-                            Text(
-                                text = tr(lang, "Сканировать QR", "QR скандоо", "Scan QR"),
-                                color = Color.White.copy(alpha = 0.85f),
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
+                )
 
                 val hasScannedToken = scannedTokenInput.trim().isNotEmpty()
 

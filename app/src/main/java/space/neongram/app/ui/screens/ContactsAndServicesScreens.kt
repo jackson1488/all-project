@@ -90,6 +90,7 @@ import space.neongram.app.core.ui.LocalNeonScheme
 import space.neongram.app.core.ui.NeonAvatar
 import space.neongram.app.core.ui.NeonInput
 import space.neongram.app.core.ui.PrimaryButton
+import space.neongram.app.core.ui.RealQrScannerBox
 import space.neongram.app.core.ui.tr
 import space.neongram.app.ui.NeongramUiState
 import space.neongram.app.ui.NeongramViewModel
@@ -205,11 +206,13 @@ fun ContactsTabScreen(
     val serverBaseUrl = state.session.serverUrl
 
     var searchQuery by remember { mutableStateOf("") }
+    var showSearchBar by remember { mutableStateOf(true) }
     var fabExpanded by remember { mutableStateOf(false) }
     var showCreateGroupModal by remember { mutableStateOf(false) }
     var showAddLoginModal by remember { mutableStateOf(false) }
     var showMyQrModal by remember { mutableStateOf(false) }
     var showScanQrModal by remember { mutableStateOf(false) }
+    var contactQrModalTab by remember { mutableStateOf("my_qr") }
 
     val knownContacts = remember(state.chats, state.searchResults, currentUserId, searchQuery) {
         val map = linkedMapOf<String, UserDto>()
@@ -275,9 +278,9 @@ fun ContactsTabScreen(
                 .statusBarsPadding()
                 .padding(horizontal = 20.dp)
         ) {
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // Large "Contacts / Контакты" Header (34.sp, ExtraBold) + Frosted Glass Capsule "Создать группу"
+            // Compact Telegram-style Header: "Контакты" (26.sp, ExtraBold) + Right compact glass pill buttons
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -287,9 +290,9 @@ fun ContactsTabScreen(
                     Text(
                         text = tr(lang, "Контакты", "Байланыштар", "Contacts"),
                         color = scheme.text,
-                        fontSize = 34.sp,
+                        fontSize = 26.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        letterSpacing = (-0.5).sp,
+                        letterSpacing = (-0.4).sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -301,134 +304,195 @@ fun ContactsTabScreen(
                             "${knownContacts.size} people connected"
                         ),
                         color = scheme.muted,
-                        fontSize = 13.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Medium
                     )
                 }
 
-                Spacer(modifier = Modifier.width(12.dp))
-
-                // Frosted Glass Capsule "Создать группу" Button (RoundedCornerShape(22.dp))
                 Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(22.dp))
-                        .background(
-                            Brush.linearGradient(
-                                colors = listOf(
-                                    scheme.primary.copy(alpha = 0.20f),
-                                    scheme.accent.copy(alpha = 0.24f)
-                                )
-                            )
-                        )
-                        .border(
-                            width = 1.dp,
-                            brush = Brush.linearGradient(
-                                colors = listOf(
-                                    scheme.primary.copy(alpha = 0.75f),
-                                    scheme.accent.copy(alpha = 0.65f)
-                                )
-                            ),
-                            shape = RoundedCornerShape(22.dp)
-                        )
-                        .clickable { showCreateGroupModal = true }
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.People,
-                        contentDescription = "Create Group",
-                        tint = scheme.primary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Text(
-                        text = tr(lang, "Создать группу", "Топ түзүү", "Create group"),
-                        color = scheme.text,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Frosted Glass Capsule Search Bar (RoundedCornerShape(24.dp))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 52.dp)
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(glassCardBrush)
-                    .border(
-                        width = 1.dp,
-                        brush = specularBorderBrush,
-                        shape = RoundedCornerShape(24.dp)
-                    )
-                    .padding(horizontal = 18.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Search,
-                    contentDescription = "Search",
-                    tint = scheme.primary,
-                    modifier = Modifier.size(20.dp)
-                )
-                Box(
-                    modifier = Modifier.weight(1f),
-                    contentAlignment = Alignment.CenterStart
-                ) {
-                    if (searchQuery.isEmpty()) {
-                        Text(
-                            text = tr(
-                                lang,
-                                "Поиск контактов или @username...",
-                                "Байланыш же @username издөө...",
-                                "Search contacts or @username..."
-                            ),
-                            color = scheme.muted,
-                            fontSize = 15.sp
-                        )
-                    }
-                    BasicTextField(
-                        value = searchQuery,
-                        onValueChange = {
-                            searchQuery = it
-                            viewModel.searchUsers(it)
-                        },
-                        singleLine = true,
-                        textStyle = TextStyle(
-                            color = scheme.text,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Medium
-                        ),
-                        cursorBrush = SolidColor(scheme.primary),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-                if (searchQuery.isNotEmpty()) {
+                    // Small Search button (38.dp circle)
                     Box(
                         modifier = Modifier
-                            .size(26.dp)
+                            .size(38.dp)
                             .clip(CircleShape)
-                            .background(scheme.surfaceAlt.copy(alpha = 0.8f))
+                            .background(glassCardBrush)
+                            .border(
+                                width = 1.dp,
+                                brush = specularBorderBrush,
+                                shape = CircleShape
+                            )
+                            .clickable { showSearchBar = !showSearchBar },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "Search Contacts",
+                            tint = scheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    // "Создать группу" glass pill (RoundedCornerShape(20.dp))
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(
+                                Brush.linearGradient(
+                                    colors = listOf(
+                                        scheme.primary.copy(alpha = 0.20f),
+                                        scheme.accent.copy(alpha = 0.24f)
+                                    )
+                                )
+                            )
+                            .border(
+                                width = 1.dp,
+                                brush = Brush.linearGradient(
+                                    colors = listOf(
+                                        scheme.primary.copy(alpha = 0.75f),
+                                        scheme.accent.copy(alpha = 0.65f)
+                                    )
+                                ),
+                                shape = RoundedCornerShape(20.dp)
+                            )
+                            .clickable { showCreateGroupModal = true }
+                            .padding(horizontal = 12.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.People,
+                            contentDescription = "Create Group",
+                            tint = scheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = tr(lang, "Создать группу", "Топ түзүү", "Create group"),
+                            color = scheme.text,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    // Small QR button (38.dp circle, QrCodeScanner) opening Contact QR Modal directly
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(
+                                Brush.linearGradient(
+                                    colors = listOf(
+                                        scheme.primary.copy(alpha = 0.22f),
+                                        scheme.accent.copy(alpha = 0.26f)
+                                    )
+                                )
+                            )
+                            .border(
+                                width = 1.dp,
+                                brush = specularBorderBrush,
+                                shape = CircleShape
+                            )
                             .clickable {
-                                searchQuery = ""
-                                viewModel.searchUsers("")
+                                contactQrModalTab = "my_qr"
+                                showMyQrModal = true
                             },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Clear",
-                            tint = scheme.muted,
-                            modifier = Modifier.size(15.dp)
+                            imageVector = Icons.Default.QrCodeScanner,
+                            contentDescription = "Contact QR",
+                            tint = scheme.primary,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
+
+            AnimatedVisibility(visible = showSearchBar) {
+                Column {
+                    // Frosted Glass Capsule Search Bar (RoundedCornerShape(24.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 52.dp)
+                            .clip(RoundedCornerShape(24.dp))
+                            .background(glassCardBrush)
+                            .border(
+                                width = 1.dp,
+                                brush = specularBorderBrush,
+                                shape = RoundedCornerShape(24.dp)
+                            )
+                            .padding(horizontal = 18.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "Search",
+                            tint = scheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Box(
+                            modifier = Modifier.weight(1f),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            if (searchQuery.isEmpty()) {
+                                Text(
+                                    text = tr(
+                                        lang,
+                                        "Поиск контактов или @username...",
+                                        "Байланыш же @username издөө...",
+                                        "Search contacts or @username..."
+                                    ),
+                                    color = scheme.muted,
+                                    fontSize = 15.sp
+                                )
+                            }
+                            BasicTextField(
+                                value = searchQuery,
+                                onValueChange = {
+                                    searchQuery = it
+                                    viewModel.searchUsers(it)
+                                },
+                                singleLine = true,
+                                textStyle = TextStyle(
+                                    color = scheme.text,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Medium
+                                ),
+                                cursorBrush = SolidColor(scheme.primary),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                        if (searchQuery.isNotEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .size(26.dp)
+                                    .clip(CircleShape)
+                                    .background(scheme.surfaceAlt.copy(alpha = 0.8f))
+                                    .clickable {
+                                        searchQuery = ""
+                                        viewModel.searchUsers("")
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Clear",
+                                    tint = scheme.muted,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+            }
 
             // Contacts List rendered as Frosted Liquid Glass Cards (RoundedCornerShape(26.dp))
             if (knownContacts.isEmpty()) {
@@ -542,6 +606,7 @@ fun ContactsTabScreen(
                         icon = Icons.Default.QrCode2,
                         onClick = {
                             fabExpanded = false
+                            contactQrModalTab = "my_qr"
                             showMyQrModal = true
                         }
                     )
@@ -550,6 +615,7 @@ fun ContactsTabScreen(
                         icon = Icons.Default.QrCodeScanner,
                         onClick = {
                             fabExpanded = false
+                            contactQrModalTab = "scan_qr"
                             showScanQrModal = true
                         }
                     )
@@ -798,63 +864,19 @@ fun ContactsTabScreen(
         }
     }
 
-    // 3. My Contact QR Modal
-    if (showMyQrModal) {
+    // 3. Unified Contact QR Modal with 2-tab glass pill switcher ("Мой QR-код" / "Сканировать QR")
+    if (showMyQrModal || showScanQrModal) {
         val myUsername = state.currentUser?.username?.ifBlank { state.session.username } ?: state.session.username
-        val qrPayload = "neongram://contact/$myUsername"
+        val qrPayload = "neongram://user/$myUsername"
         val clipboard = LocalClipboardManager.current
-
-        Dialog(onDismissRequest = { showMyQrModal = false }) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(28.dp))
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                scheme.surface.copy(alpha = 0.96f),
-                                scheme.bgAlt.copy(alpha = 0.96f)
-                            )
-                        )
-                    )
-                    .border(1.2.dp, specularBorderBrush, RoundedCornerShape(28.dp))
-                    .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Text(
-                    text = tr(lang, "Мой QR-код", "Менин QR-кодум", "My Contact QR"),
-                    color = scheme.text,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.ExtraBold
-                )
-
-                VisualQrCodeBox(payload = qrPayload)
-
-                Text(
-                    text = qrPayload,
-                    color = scheme.primary,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    textAlign = TextAlign.Center
-                )
-
-                PrimaryButton(
-                    label = tr(lang, "Скопировать ссылку", "Шилтемени көчүрүү", "Copy link"),
-                    onClick = {
-                        clipboard.setText(AnnotatedString(qrPayload))
-                        viewModel.showToast(tr(lang, "Ссылка скопирована", "Шилтеме көчүрүлдү", "Link copied"))
-                        showMyQrModal = false
-                    }
-                )
-            }
-        }
-    }
-
-    // 4. Scan Contact QR Modal
-    if (showScanQrModal) {
         var qrCodeInput by remember { mutableStateOf("") }
-        Dialog(onDismissRequest = { showScanQrModal = false }) {
+
+        Dialog(
+            onDismissRequest = {
+                showMyQrModal = false
+                showScanQrModal = false
+            }
+        ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -869,15 +891,21 @@ fun ContactsTabScreen(
                     )
                     .border(1.2.dp, specularBorderBrush, RoundedCornerShape(28.dp))
                     .padding(22.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
+                // Header Row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = tr(lang, "Сканировать QR", "QR сканерлөө", "Scan Contact QR"),
+                        text = if (contactQrModalTab == "my_qr") {
+                            tr(lang, "Мой QR-код", "Менин QR-кодум", "My QR Code")
+                        } else {
+                            tr(lang, "Сканировать QR", "QR сканерлөө", "Scan QR")
+                        },
                         color = scheme.text,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.ExtraBold
@@ -887,7 +915,10 @@ fun ContactsTabScreen(
                             .size(32.dp)
                             .clip(CircleShape)
                             .background(scheme.surfaceAlt)
-                            .clickable { showScanQrModal = false },
+                            .clickable {
+                                showMyQrModal = false
+                                showScanQrModal = false
+                            },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
@@ -899,37 +930,106 @@ fun ContactsTabScreen(
                     }
                 }
 
-                Text(
-                    text = tr(
-                        lang,
-                        "Вставьте ссылку neongram://contact/username или логин:",
-                        "neongram://contact/username шилтемесин же логин жазыңыз:",
-                        "Paste neongram://contact/username link or login:"
-                    ),
-                    color = scheme.muted,
-                    fontSize = 13.sp
-                )
-
-                NeonInput(
-                    value = qrCodeInput,
-                    onValueChange = { qrCodeInput = it },
-                    placeholder = "neongram://contact/username"
-                )
-
-                PrimaryButton(
-                    label = tr(lang, "Добавить контакт", "Байланыш кошуу", "Add contact"),
-                    onClick = {
-                        val cleaned = qrCodeInput
-                            .trim()
-                            .removePrefix("neongram://contact/")
-                            .removePrefix("@")
-                            .trim()
-                        if (cleaned.isNotBlank()) {
-                            viewModel.addContactByLogin(cleaned)
-                            showScanQrModal = false
+                // 2-Tab Glass Pill Switcher: "Мой QR-код" | "Сканировать QR"
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(scheme.surfaceAlt.copy(alpha = 0.72f))
+                        .border(1.dp, specularBorderBrush, RoundedCornerShape(20.dp))
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf(
+                        "my_qr" to tr(lang, "Мой QR-код", "Менин QR-кодум", "Мой QR-код"),
+                        "scan_qr" to tr(lang, "Сканировать QR", "QR сканерлөө", "Сканировать QR")
+                    ).forEach { (tabKey, tabLabel) ->
+                        val isSelected = contactQrModalTab == tabKey
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(
+                                    if (isSelected) {
+                                        Brush.horizontalGradient(
+                                            colors = listOf(
+                                                scheme.primary.copy(alpha = 0.30f),
+                                                scheme.accent.copy(alpha = 0.36f)
+                                            )
+                                        )
+                                    } else {
+                                        Brush.horizontalGradient(
+                                            colors = listOf(Color.Transparent, Color.Transparent)
+                                        )
+                                    }
+                                )
+                                .clickable { contactQrModalTab = tabKey }
+                                .padding(vertical = 9.dp, horizontal = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = tabLabel,
+                                color = if (isSelected) scheme.text else scheme.muted,
+                                fontSize = 13.sp,
+                                fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
                     }
-                )
+                }
+
+                if (contactQrModalTab == "my_qr") {
+                    VisualQrCodeBox(payload = qrPayload)
+
+                    Text(
+                        text = qrPayload,
+                        color = scheme.primary,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = TextAlign.Center
+                    )
+
+                    PrimaryButton(
+                        label = tr(lang, "Скопировать ссылку", "Шилтемени көчүрүү", "Copy link"),
+                        onClick = {
+                            clipboard.setText(AnnotatedString(qrPayload))
+                            viewModel.showToast(tr(lang, "Ссылка скопирована", "Шилтеме көчүрүлдү", "Link copied"))
+                            showMyQrModal = false
+                            showScanQrModal = false
+                        }
+                    )
+                } else {
+                    // Embed real camera QR scanner
+                    RealQrScannerBox(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(250.dp),
+                        onQrCodeScanned = { scannedRaw ->
+                            viewModel.handleScannedQrPayload(scannedRaw)
+                            showMyQrModal = false
+                            showScanQrModal = false
+                        }
+                    )
+
+                    NeonInput(
+                        value = qrCodeInput,
+                        onValueChange = { qrCodeInput = it },
+                        placeholder = "neongram://user/username"
+                    )
+
+                    PrimaryButton(
+                        label = tr(lang, "Добавить контакт", "Байланыш кошуу", "Add contact"),
+                        onClick = {
+                            val raw = qrCodeInput.trim()
+                            if (raw.isNotBlank()) {
+                                viewModel.handleScannedQrPayload(raw)
+                                showMyQrModal = false
+                                showScanQrModal = false
+                            }
+                        }
+                    )
+                }
             }
         }
     }

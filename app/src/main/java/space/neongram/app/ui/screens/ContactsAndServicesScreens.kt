@@ -1,14 +1,21 @@
 package space.neongram.app.ui.screens
 
-import android.annotation.SuppressLint
-import android.view.ViewGroup
-import android.webkit.WebView
-import android.webkit.WebViewClient
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +27,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -27,88 +35,74 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.automirrored.filled.CallMade
-import androidx.compose.material.icons.automirrored.filled.CallReceived
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.AccountBalance
-import androidx.compose.material.icons.filled.AccountBalanceWallet
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Cloud
-import androidx.compose.material.icons.filled.CurrencyBitcoin
-import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.FavoriteBorder
-import androidx.compose.material.icons.filled.FilterNone
-import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.LinkOff
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.PersonAdd
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.QrCodeScanner
-import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.SportsEsports
-import androidx.compose.material.icons.filled.WbSunny
+import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
-import space.neongram.app.core.model.CryptoCoinRate
-import space.neongram.app.core.model.MusicTrackDto
 import space.neongram.app.core.model.UserDto
-import space.neongram.app.core.ui.ListRow
+import space.neongram.app.core.ui.AnimatedNeonBackground
 import space.neongram.app.core.ui.LocalNeonScheme
 import space.neongram.app.core.ui.NeonAvatar
 import space.neongram.app.core.ui.NeonInput
-import space.neongram.app.core.ui.PageScaffold
 import space.neongram.app.core.ui.PrimaryButton
 import space.neongram.app.core.ui.tr
-import space.neongram.app.ui.ActiveOverlayScreen
 import space.neongram.app.ui.NeongramUiState
 import space.neongram.app.ui.NeongramViewModel
-import java.util.Locale
 import kotlin.math.abs
+
+// ============================================================================
+// 2026 iOS 18 LIQUID GLASS & AURORA VIOLET PALETTE HELPERS
+// ============================================================================
+
+private val LiquidCyan = Color(0xFF00F0FF)
+private val AuroraViolet = Color(0xFF8B5CF6)
+private val AuroraMagenta = Color(0xFFEC4899)
+private val OnlineEmerald = Color(0xFF10B981)
 
 private fun resolveFullAvatarUrl(rawUrl: String?, serverBaseUrl: String): String? {
     val clean = rawUrl?.takeIf { it.isNotBlank() } ?: return null
@@ -118,7 +112,8 @@ private fun resolveFullAvatarUrl(rawUrl: String?, serverBaseUrl: String): String
 }
 
 /**
- * Deterministic visual QR matrix rendered on a Jetpack Compose Canvas.
+ * Deterministic visual QR matrix rendered on a Jetpack Compose Canvas
+ * with a Liquid Glass specular border.
  */
 @Composable
 fun VisualQrCodeBox(
@@ -167,9 +162,13 @@ fun VisualQrCodeBox(
     Box(
         modifier = modifier
             .size(196.dp)
-            .clip(RoundedCornerShape(18.dp))
+            .clip(RoundedCornerShape(24.dp))
             .background(Color.White)
-            .border(2.dp, scheme.primary, RoundedCornerShape(18.dp))
+            .border(
+                width = 2.dp,
+                brush = Brush.linearGradient(listOf(scheme.primary, scheme.accent)),
+                shape = RoundedCornerShape(24.dp)
+            )
             .padding(14.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -191,9 +190,10 @@ fun VisualQrCodeBox(
     }
 }
 
-/**
- * 1:1 with `ContactsScreen.jsx`.
- */
+// ============================================================================
+// 1. CONTACTS TAB SCREEN — 2026 iOS 18 LIQUID GLASS & AURORA VIOLET
+// ============================================================================
+
 @Composable
 fun ContactsTabScreen(
     state: NeongramUiState,
@@ -240,55 +240,139 @@ fun ContactsTabScreen(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        PageScaffold(
-            title = tr(lang, "Контакты", "Байланыштар", "Contacts"),
-            scroll = false
+    val glassCardBrush = Brush.linearGradient(
+        colors = if (scheme.isDark) {
+            listOf(
+                scheme.surface.copy(alpha = 0.78f),
+                scheme.surfaceAlt.copy(alpha = 0.52f)
+            )
+        } else {
+            listOf(
+                scheme.surface.copy(alpha = 0.92f),
+                scheme.surfaceAlt.copy(alpha = 0.76f)
+            )
+        }
+    )
+
+    val specularBorderBrush = Brush.linearGradient(
+        colors = listOf(
+            scheme.primary.copy(alpha = 0.55f),
+            Color.White.copy(alpha = if (scheme.isDark) 0.16f else 0.65f),
+            scheme.accent.copy(alpha = 0.50f)
+        )
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(scheme.bg)
+    ) {
+        AnimatedNeonBackground()
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .padding(horizontal = 20.dp)
         ) {
-            // Top "Создать группу" button
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Large "Contacts / Контакты" Header (34.sp, ExtraBold) + Frosted Glass Capsule "Создать группу"
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 46.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(scheme.surface)
-                    .border(1.dp, scheme.border, RoundedCornerShape(14.dp))
-                    .clickable { showCreateGroupModal = true }
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Icon(
-                    imageVector = Icons.Default.People,
-                    contentDescription = "Create Group",
-                    tint = scheme.primary,
-                    modifier = Modifier.size(20.dp)
-                )
-                Text(
-                    text = tr(lang, "Создать группу", "Топ түзүү", "Create group"),
-                    color = scheme.primary,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = tr(lang, "Контакты", "Байланыштар", "Contacts"),
+                        color = scheme.text,
+                        fontSize = 34.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = (-0.5).sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = tr(
+                            lang,
+                            "${knownContacts.size} в вашем списке",
+                            "${knownContacts.size} байланыш",
+                            "${knownContacts.size} people connected"
+                        ),
+                        color = scheme.muted,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(12.dp))
+
+                // Frosted Glass Capsule "Создать группу" Button (RoundedCornerShape(22.dp))
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(
+                            Brush.linearGradient(
+                                colors = listOf(
+                                    scheme.primary.copy(alpha = 0.20f),
+                                    scheme.accent.copy(alpha = 0.24f)
+                                )
+                            )
+                        )
+                        .border(
+                            width = 1.dp,
+                            brush = Brush.linearGradient(
+                                colors = listOf(
+                                    scheme.primary.copy(alpha = 0.75f),
+                                    scheme.accent.copy(alpha = 0.65f)
+                                )
+                            ),
+                            shape = RoundedCornerShape(22.dp)
+                        )
+                        .clickable { showCreateGroupModal = true }
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.People,
+                        contentDescription = "Create Group",
+                        tint = scheme.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = tr(lang, "Создать группу", "Топ түзүү", "Create group"),
+                        color = scheme.text,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
 
-            // Search Bar
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Frosted Glass Capsule Search Bar (RoundedCornerShape(24.dp))
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 46.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(scheme.surface)
-                    .border(1.dp, scheme.border, RoundedCornerShape(14.dp))
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                    .heightIn(min = 52.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(glassCardBrush)
+                    .border(
+                        width = 1.dp,
+                        brush = specularBorderBrush,
+                        shape = RoundedCornerShape(24.dp)
+                    )
+                    .padding(horizontal = 18.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.Search,
                     contentDescription = "Search",
-                    tint = scheme.muted,
-                    modifier = Modifier.size(18.dp)
+                    tint = scheme.primary,
+                    modifier = Modifier.size(20.dp)
                 )
                 Box(
                     modifier = Modifier.weight(1f),
@@ -296,7 +380,12 @@ fun ContactsTabScreen(
                 ) {
                     if (searchQuery.isEmpty()) {
                         Text(
-                            text = tr(lang, "Поиск контактов", "Байланыш издөө", "Search contacts"),
+                            text = tr(
+                                lang,
+                                "Поиск контактов или @username...",
+                                "Байланыш же @username издөө...",
+                                "Search contacts or @username..."
+                            ),
                             color = scheme.muted,
                             fontSize = 15.sp
                         )
@@ -308,27 +397,40 @@ fun ContactsTabScreen(
                             viewModel.searchUsers(it)
                         },
                         singleLine = true,
-                        textStyle = TextStyle(color = scheme.text, fontSize = 15.sp),
+                        textStyle = TextStyle(
+                            color = scheme.text,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium
+                        ),
                         cursorBrush = SolidColor(scheme.primary),
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
                 if (searchQuery.isNotEmpty()) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Clear",
-                        tint = scheme.muted,
+                    Box(
                         modifier = Modifier
-                            .size(18.dp)
+                            .size(26.dp)
+                            .clip(CircleShape)
+                            .background(scheme.surfaceAlt.copy(alpha = 0.8f))
                             .clickable {
                                 searchQuery = ""
                                 viewModel.searchUsers("")
-                            }
-                    )
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Clear",
+                            tint = scheme.muted,
+                            modifier = Modifier.size(15.dp)
+                        )
+                    }
                 }
             }
 
-            // Contacts LazyColumn
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Contacts List rendered as Frosted Liquid Glass Cards (RoundedCornerShape(26.dp))
             if (knownContacts.isEmpty()) {
                 Box(
                     modifier = Modifier
@@ -337,25 +439,54 @@ fun ContactsTabScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(28.dp))
+                            .background(glassCardBrush)
+                            .border(1.dp, specularBorderBrush, RoundedCornerShape(28.dp))
+                            .padding(28.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
+                        Box(
+                            modifier = Modifier
+                                .size(64.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    Brush.radialGradient(
+                                        colors = listOf(
+                                            scheme.primary.copy(alpha = 0.28f),
+                                            scheme.accent.copy(alpha = 0.10f)
+                                        )
+                                    )
+                                )
+                                .border(1.dp, specularBorderBrush, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.People,
+                                contentDescription = null,
+                                tint = scheme.primary,
+                                modifier = Modifier.size(30.dp)
+                            )
+                        }
                         Text(
                             text = tr(lang, "Список контактов пуст", "Байланыштар тизмеси бош", "No contacts yet"),
                             color = scheme.text,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.SemiBold
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
                         )
                         Text(
                             text = tr(
                                 lang,
-                                "Нажмите + чтобы добавить контакт по @username или QR",
-                                "+ басып @username же QR менен кошуңуз",
-                                "Tap + to add a contact by @username or QR"
+                                "Нажмите + чтобы добавить контакт по @username или QR-коду",
+                                "+ басып @username же QR-код менен кошуңуз",
+                                "Tap + to add a contact by @username or QR code"
                             ),
                             color = scheme.muted,
                             fontSize = 13.sp,
-                            textAlign = TextAlign.Center
+                            textAlign = TextAlign.Center,
+                            lineHeight = 18.sp
                         )
                     }
                 }
@@ -364,79 +495,95 @@ fun ContactsTabScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     items(knownContacts, key = { it.id }) { contact ->
-                        val statusText = if (contact.isOnline) {
-                            tr(lang, "в сети", "тармакта", "online")
-                        } else {
-                            tr(lang, "не в сети", "тармакта эмес", "offline")
-                        }
-                        val subtitle = "@${contact.username} • $statusText"
-                        ListRow(
-                            title = contact.effectiveName,
-                            subtitle = subtitle,
-                            avatarUrl = resolveFullAvatarUrl(contact.avatarUrl, serverBaseUrl),
-                            avatarLabel = contact.effectiveName,
-                            showChevron = false,
+                        LiquidGlassContactCard(
+                            contact = contact,
+                            serverBaseUrl = serverBaseUrl,
+                            lang = lang,
                             onClick = { viewModel.startDirectChat(contact) }
                         )
                     }
                     item {
-                        Spacer(modifier = Modifier.height(88.dp))
+                        Spacer(modifier = Modifier.height(110.dp))
                     }
                 }
             }
         }
 
-        // Speed-Dial Menu + Floating Action Button
+        // Speed-Dial Glass Menu + Floating Liquid Glass FAB (60.dp circle with cyan-violet gradient & specular border)
         Column(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(end = 22.dp, bottom = 104.dp),
             horizontalAlignment = Alignment.End,
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            if (fabExpanded) {
-                SpeedDialMenuItem(
-                    label = tr(lang, "Добавить по логину", "Логин менен кошуу", "Add by username"),
-                    icon = Icons.Default.PersonAdd,
-                    onClick = {
-                        fabExpanded = false
-                        showAddLoginModal = true
-                    }
-                )
-                SpeedDialMenuItem(
-                    label = tr(lang, "Показать мой QR", "Менин QR кодум", "Show my QR"),
-                    icon = Icons.Default.QrCode2,
-                    onClick = {
-                        fabExpanded = false
-                        showMyQrModal = true
-                    }
-                )
-                SpeedDialMenuItem(
-                    label = tr(lang, "Сканировать QR", "QR сканерлөө", "Scan QR"),
-                    icon = Icons.Default.QrCodeScanner,
-                    onClick = {
-                        fabExpanded = false
-                        showScanQrModal = true
-                    }
-                )
+            AnimatedVisibility(
+                visible = fabExpanded,
+                enter = fadeIn() + scaleIn(initialScale = 0.85f),
+                exit = fadeOut() + scaleOut(targetScale = 0.85f)
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    LiquidSpeedDialMenuItem(
+                        label = tr(lang, "Добавить по логину", "Логин менен кошуу", "Add by username"),
+                        icon = Icons.Default.PersonAdd,
+                        onClick = {
+                            fabExpanded = false
+                            showAddLoginModal = true
+                        }
+                    )
+                    LiquidSpeedDialMenuItem(
+                        label = tr(lang, "Показать мой QR", "Менин QR кодум", "Show my QR"),
+                        icon = Icons.Default.QrCode2,
+                        onClick = {
+                            fabExpanded = false
+                            showMyQrModal = true
+                        }
+                    )
+                    LiquidSpeedDialMenuItem(
+                        label = tr(lang, "Сканировать QR", "QR сканерлөө", "Scan QR"),
+                        icon = Icons.Default.QrCodeScanner,
+                        onClick = {
+                            fabExpanded = false
+                            showScanQrModal = true
+                        }
+                    )
+                }
             }
 
             Box(
                 modifier = Modifier
-                    .size(58.dp)
+                    .size(60.dp)
                     .clip(CircleShape)
-                    .background(scheme.primary)
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(scheme.primary, scheme.accent, AuroraMagenta)
+                        )
+                    )
+                    .border(
+                        width = 1.5.dp,
+                        brush = Brush.linearGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = 0.85f),
+                                scheme.primary.copy(alpha = 0.6f),
+                                AuroraViolet.copy(alpha = 0.8f)
+                            )
+                        ),
+                        shape = CircleShape
+                    )
                     .clickable { fabExpanded = !fabExpanded },
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = if (fabExpanded) Icons.Default.Close else Icons.Default.Add,
                     contentDescription = "Contacts Actions",
-                    tint = if (scheme.isDark) Color(0xFF06070C) else Color.White,
-                    modifier = Modifier.size(26.dp)
+                    tint = Color.White,
+                    modifier = Modifier.size(28.dp)
                 )
             }
         }
@@ -451,11 +598,18 @@ fun ContactsTabScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(scheme.surface)
-                    .border(1.dp, scheme.border, RoundedCornerShape(20.dp))
-                    .padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                scheme.surface.copy(alpha = 0.96f),
+                                scheme.bgAlt.copy(alpha = 0.96f)
+                            )
+                        )
+                    )
+                    .border(1.2.dp, specularBorderBrush, RoundedCornerShape(28.dp))
+                    .padding(22.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -465,17 +619,24 @@ fun ContactsTabScreen(
                     Text(
                         text = tr(lang, "Создать группу", "Топ түзүү", "Create Group"),
                         color = scheme.text,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.ExtraBold
                     )
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Close",
-                        tint = scheme.muted,
+                    Box(
                         modifier = Modifier
-                            .size(22.dp)
-                            .clickable { showCreateGroupModal = false }
-                    )
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(scheme.surfaceAlt)
+                            .clickable { showCreateGroupModal = false },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = scheme.muted,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
 
                 NeonInput(
@@ -502,12 +663,18 @@ fun ContactsTabScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(if (isSelected) scheme.surfaceAlt else scheme.bgAlt)
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(
+                                    if (isSelected) {
+                                        scheme.primary.copy(alpha = 0.16f)
+                                    } else {
+                                        scheme.surfaceAlt.copy(alpha = 0.65f)
+                                    }
+                                )
                                 .border(
-                                    1.dp,
-                                    if (isSelected) scheme.primary else scheme.border,
-                                    RoundedCornerShape(12.dp)
+                                    width = 1.dp,
+                                    color = if (isSelected) scheme.primary else scheme.border,
+                                    shape = RoundedCornerShape(18.dp)
                                 )
                                 .clickable {
                                     if (isSelected) selectedIds.remove(contact.id) else selectedIds.add(contact.id)
@@ -523,15 +690,15 @@ fun ContactsTabScreen(
                                 NeonAvatar(
                                     avatarUrl = resolveFullAvatarUrl(contact.avatarUrl, serverBaseUrl),
                                     label = contact.effectiveName,
-                                    sizeDp = 34.dp,
-                                    cornerRadiusDp = 10.dp
+                                    sizeDp = 36.dp,
+                                    cornerRadiusDp = 18.dp
                                 )
                                 Column {
                                     Text(
                                         text = contact.effectiveName,
                                         color = scheme.text,
                                         fontSize = 14.sp,
-                                        fontWeight = FontWeight.SemiBold
+                                        fontWeight = FontWeight.Bold
                                     )
                                     Text(
                                         text = "@${contact.username}",
@@ -570,11 +737,18 @@ fun ContactsTabScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(scheme.surface)
-                    .border(1.dp, scheme.border, RoundedCornerShape(20.dp))
-                    .padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                scheme.surface.copy(alpha = 0.96f),
+                                scheme.bgAlt.copy(alpha = 0.96f)
+                            )
+                        )
+                    )
+                    .border(1.2.dp, specularBorderBrush, RoundedCornerShape(28.dp))
+                    .padding(22.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -584,17 +758,24 @@ fun ContactsTabScreen(
                     Text(
                         text = tr(lang, "Добавить по логину", "Логин менен кошуу", "Add by username"),
                         color = scheme.text,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.ExtraBold
                     )
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Close",
-                        tint = scheme.muted,
+                    Box(
                         modifier = Modifier
-                            .size(22.dp)
-                            .clickable { showAddLoginModal = false }
-                    )
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(scheme.surfaceAlt)
+                            .clickable { showAddLoginModal = false },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = scheme.muted,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
 
                 NeonInput(
@@ -604,7 +785,7 @@ fun ContactsTabScreen(
                 )
 
                 PrimaryButton(
-                    label = tr(lang, "Отправить", "Жөнөтүү", "Send"),
+                    label = tr(lang, "Открыть чат", "Чатты ачуу", "Open chat"),
                     onClick = {
                         val cleaned = loginInput.trim().removePrefix("@")
                         if (cleaned.isNotBlank()) {
@@ -627,18 +808,25 @@ fun ContactsTabScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(scheme.surface)
-                    .border(1.dp, scheme.border, RoundedCornerShape(20.dp))
-                    .padding(20.dp),
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                scheme.surface.copy(alpha = 0.96f),
+                                scheme.bgAlt.copy(alpha = 0.96f)
+                            )
+                        )
+                    )
+                    .border(1.2.dp, specularBorderBrush, RoundedCornerShape(28.dp))
+                    .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Text(
                     text = tr(lang, "Мой QR-код", "Менин QR-кодум", "My Contact QR"),
                     color = scheme.text,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.ExtraBold
                 )
 
                 VisualQrCodeBox(payload = qrPayload)
@@ -670,11 +858,18 @@ fun ContactsTabScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(scheme.surface)
-                    .border(1.dp, scheme.border, RoundedCornerShape(20.dp))
-                    .padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                scheme.surface.copy(alpha = 0.96f),
+                                scheme.bgAlt.copy(alpha = 0.96f)
+                            )
+                        )
+                    )
+                    .border(1.2.dp, specularBorderBrush, RoundedCornerShape(28.dp))
+                    .padding(22.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -684,17 +879,24 @@ fun ContactsTabScreen(
                     Text(
                         text = tr(lang, "Сканировать QR", "QR сканерлөө", "Scan Contact QR"),
                         color = scheme.text,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.ExtraBold
                     )
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Close",
-                        tint = scheme.muted,
+                    Box(
                         modifier = Modifier
-                            .size(22.dp)
-                            .clickable { showScanQrModal = false }
-                    )
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(scheme.surfaceAlt)
+                            .clickable { showScanQrModal = false },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = scheme.muted,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
 
                 Text(
@@ -733,8 +935,198 @@ fun ContactsTabScreen(
     }
 }
 
+/**
+ * Frosted Liquid Glass Contact Card (`RoundedCornerShape(26.dp)`, `1.dp` specular gradient border,
+ * circular `52.dp` avatar with glowing cyan/violet ring, bold name, `@username`, and online status dot).
+ */
 @Composable
-private fun SpeedDialMenuItem(
+private fun LiquidGlassContactCard(
+    contact: UserDto,
+    serverBaseUrl: String,
+    lang: String,
+    onClick: () -> Unit
+) {
+    val scheme = LocalNeonScheme.current
+    val avatarUrl = resolveFullAvatarUrl(contact.avatarUrl, serverBaseUrl)
+    val initial = contact.effectiveName.trim().take(1).uppercase().ifBlank { "N" }
+
+    val cardBrush = Brush.linearGradient(
+        colors = if (scheme.isDark) {
+            listOf(
+                scheme.surface.copy(alpha = 0.80f),
+                scheme.surfaceAlt.copy(alpha = 0.55f)
+            )
+        } else {
+            listOf(
+                scheme.surface.copy(alpha = 0.94f),
+                scheme.surfaceAlt.copy(alpha = 0.78f)
+            )
+        }
+    )
+
+    val cardBorderBrush = Brush.linearGradient(
+        colors = listOf(
+            scheme.primary.copy(alpha = if (contact.isOnline) 0.65f else 0.35f),
+            Color.White.copy(alpha = if (scheme.isDark) 0.14f else 0.60f),
+            scheme.accent.copy(alpha = 0.45f)
+        )
+    )
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(26.dp))
+            .background(cardBrush)
+            .border(
+                width = 1.dp,
+                brush = cardBorderBrush,
+                shape = RoundedCornerShape(26.dp)
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        // Circular 52.dp Avatar with glowing cyan/violet ring + online status dot
+        Box(modifier = Modifier.size(56.dp), contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(CircleShape)
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(
+                                scheme.primary.copy(alpha = 0.25f),
+                                scheme.accent.copy(alpha = 0.30f)
+                            )
+                        )
+                    )
+                    .border(
+                        width = 1.8.dp,
+                        brush = Brush.linearGradient(
+                            colors = listOf(scheme.primary, scheme.accent, AuroraMagenta)
+                        ),
+                        shape = CircleShape
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = initial,
+                    color = scheme.text,
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+                if (!avatarUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = avatarUrl,
+                        contentDescription = contact.effectiveName,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(CircleShape)
+                    )
+                }
+            }
+
+            // Online Status Dot
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .size(14.dp)
+                    .clip(CircleShape)
+                    .background(scheme.bg)
+                    .padding(2.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(CircleShape)
+                        .background(
+                            if (contact.isOnline) OnlineEmerald else scheme.muted.copy(alpha = 0.55f)
+                        )
+                )
+            }
+        }
+
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = contact.effectiveName,
+                color = scheme.text,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = "@${contact.username}",
+                    color = scheme.primary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "•",
+                    color = scheme.muted,
+                    fontSize = 12.sp
+                )
+                Text(
+                    text = if (contact.isOnline) {
+                        tr(lang, "в сети", "тармакта", "online")
+                    } else {
+                        tr(lang, "не в сети", "тармакта эмес", "offline")
+                    },
+                    color = if (contact.isOnline) OnlineEmerald else scheme.muted,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
+
+        // Frosted Glass Action Pill
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .clip(CircleShape)
+                .background(
+                    Brush.linearGradient(
+                        colors = listOf(
+                            scheme.primary.copy(alpha = 0.16f),
+                            scheme.accent.copy(alpha = 0.22f)
+                        )
+                    )
+                )
+                .border(
+                    width = 1.dp,
+                    brush = Brush.linearGradient(
+                        colors = listOf(
+                            scheme.primary.copy(alpha = 0.55f),
+                            scheme.accent.copy(alpha = 0.55f)
+                        )
+                    ),
+                    shape = CircleShape
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.Send,
+                contentDescription = "Message",
+                tint = scheme.primary,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun LiquidSpeedDialMenuItem(
     label: String,
     icon: ImageVector,
     onClick: () -> Unit
@@ -742,11 +1134,27 @@ private fun SpeedDialMenuItem(
     val scheme = LocalNeonScheme.current
     Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(14.dp))
-            .background(scheme.surface)
-            .border(1.dp, scheme.border, RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(22.dp))
+            .background(
+                Brush.linearGradient(
+                    colors = listOf(
+                        scheme.surface.copy(alpha = 0.94f),
+                        scheme.surfaceAlt.copy(alpha = 0.88f)
+                    )
+                )
+            )
+            .border(
+                width = 1.dp,
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        scheme.primary.copy(alpha = 0.65f),
+                        scheme.accent.copy(alpha = 0.55f)
+                    )
+                ),
+                shape = RoundedCornerShape(22.dp)
+            )
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .padding(horizontal = 16.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
@@ -760,24 +1168,82 @@ private fun SpeedDialMenuItem(
             text = label,
             color = scheme.text,
             fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold
+            fontWeight = FontWeight.Bold
         )
     }
 }
 
-private data class ServiceCardItemData(
+// ============================================================================
+// 2. SERVICES TAB SCREEN — EXCLUSIVE NEONGRAM AI HUB (LIQUID GLASS 2026)
+// ============================================================================
+
+private data class AiModelOption(
     val id: String,
-    val title: String,
-    val description: String,
-    val monogram: String,
-    val accentColor: Color,
+    val titleRu: String,
+    val titleKy: String,
+    val titleEn: String,
+    val badge: String,
+    val accentColor: Color
+)
+
+private data class AiPersonaOption(
+    val id: String,
+    val titleRu: String,
+    val titleKy: String,
+    val titleEn: String,
+    val subtitleRu: String,
+    val subtitleKy: String,
+    val subtitleEn: String,
     val icon: ImageVector,
-    val onClick: () -> Unit
+    val accentColor: Color
+)
+
+private data class QuickAiPromptChip(
+    val titleRu: String,
+    val titleKy: String,
+    val titleEn: String,
+    val promptRu: String,
+    val promptKy: String,
+    val promptEn: String,
+    val icon: ImageVector,
+    val accentColor: Color
 )
 
 /**
- * 1:1 with `ServicesScreen.jsx` featuring the 8 Service Cards.
+ * Shared reactive holder so `ServicesTabScreen` works seamlessly with `state.aiModel` / `state.aiMode`
+ * and `viewModel.setAiModel(...)` / `viewModel.setAiMode(...)`.
  */
+private object NeongramAiHubPreferences {
+    var aiModel by mutableStateOf("fast")
+    var aiMode by mutableStateOf("normal")
+}
+
+val NeongramUiState.aiModel: String
+    get() = NeongramAiHubPreferences.aiModel
+
+val NeongramUiState.aiMode: String
+    get() = NeongramAiHubPreferences.aiMode
+
+fun NeongramViewModel.setAiModel(modelId: String) {
+    NeongramAiHubPreferences.aiModel = modelId
+}
+
+fun NeongramViewModel.setAiMode(modeId: String) {
+    NeongramAiHubPreferences.aiMode = modeId
+}
+
+/**
+ * Opens the Neongram AI assistant chat and optionally dispatches an immediate prompt.
+ */
+private fun NeongramViewModel.askNeongramAi(state: NeongramUiState, rawPrompt: String) {
+    val cleanPrompt = rawPrompt.trim()
+    val aiChat = state.chats.firstOrNull { it.isAiChat }
+    openAiAssistantChat()
+    if (cleanPrompt.isNotBlank() && aiChat != null) {
+        sendMessage(cleanPrompt)
+    }
+}
+
 @Composable
 fun ServicesTabScreen(
     state: NeongramUiState,
@@ -785,1247 +1251,505 @@ fun ServicesTabScreen(
 ) {
     val scheme = LocalNeonScheme.current
     val lang = state.session.language
+    var promptInput by remember { mutableStateOf("") }
 
-    val cards = listOf(
-        ServiceCardItemData(
-            id = "weather",
-            title = tr(lang, "Погода", "Аба ырайы", "Weather"),
-            description = tr(lang, "Прогноз погоды по городам, ветер и влажность", "Шаарлар боюнча аба ырайы", "Live forecast, wind & humidity by city"),
-            monogram = "WTH",
-            accentColor = scheme.primary,
-            icon = Icons.Default.Cloud,
-            onClick = { viewModel.navigateToOverlay(ActiveOverlayScreen.SERVICE_WEATHER) }
+    val selectedModel = state.aiModel
+    val selectedMode = state.aiMode
+
+    val aiModels = remember {
+        listOf(
+            AiModelOption(
+                id = "fast",
+                titleRu = "⚡ Быстрая (Fast)",
+                titleKy = "⚡ Ыкчам (Fast)",
+                titleEn = "⚡ Fast (Neon-Flash)",
+                badge = "0.2s • Instant",
+                accentColor = LiquidCyan
+            ),
+            AiModelOption(
+                id = "thinking",
+                titleRu = "🧠 Думающая (Thinking)",
+                titleKy = "🧠 Ойлонуучу (Thinking)",
+                titleEn = "🧠 Thinking (DeepReason)",
+                badge = "Chain-of-Thought",
+                accentColor = AuroraViolet
+            ),
+            AiModelOption(
+                id = "pro",
+                titleRu = "💎 Лучшая (Pro)",
+                titleKy = "💎 Мыкты (Pro)",
+                titleEn = "💎 Best (Neon-Pro Ultra)",
+                badge = "Max Intelligence",
+                accentColor = AuroraMagenta
+            )
+        )
+    }
+
+    val aiPersonas = remember {
+        listOf(
+            AiPersonaOption(
+                id = "normal",
+                titleRu = "✨ Обычный режим",
+                titleKy = "✨ Кадимки режим",
+                titleEn = "✨ Standard Mode",
+                subtitleRu = "Универсальный нейро-ассистент на каждый день",
+                subtitleKy = "Күнүмдүк универсалдуу нейро-жардамчы",
+                subtitleEn = "Versatile everyday neural assistant",
+                icon = Icons.Default.AutoAwesome,
+                accentColor = LiquidCyan
+            ),
+            AiPersonaOption(
+                id = "study",
+                titleRu = "🎓 Учебный режим",
+                titleKy = "🎓 Окуу режими",
+                titleEn = "🎓 Study & Tutor",
+                subtitleRu = "Пошаговые разборы, формулы и подготовка",
+                subtitleKy = "Кадамдык түшүндүрмөлөр жана даярдык",
+                subtitleEn = "Step-by-step explanations & exam prep",
+                icon = Icons.Default.School,
+                accentColor = Color(0xFF38BDF8)
+            ),
+            AiPersonaOption(
+                id = "psychologist",
+                titleRu = "💜 Психолог",
+                titleKy = "💜 Психолог",
+                titleEn = "💜 Empathy Coach",
+                subtitleRu = "Бережная поддержка, рефлексия и баланс",
+                subtitleKy = "Камкор колдоо жана ички баланс",
+                subtitleEn = "Mindful support, reflection & calm",
+                icon = Icons.Default.Favorite,
+                accentColor = AuroraMagenta
+            ),
+            AiPersonaOption(
+                id = "coding",
+                titleRu = "💻 Кодинг и Архитектура",
+                titleKy = "💻 Кодинг жана Архитектура",
+                titleEn = "💻 Coding & Architecture",
+                subtitleRu = "Kotlin, Compose, алгоритмы и ревью кода",
+                subtitleKy = "Kotlin, Compose, алгоритмдер жана код",
+                subtitleEn = "Kotlin, Compose, system design & debugging",
+                icon = Icons.Default.Code,
+                accentColor = AuroraViolet
+            )
+        )
+    }
+
+    val quickPrompts = remember {
+        listOf(
+            QuickAiPromptChip(
+                titleRu = "Напиши код на Kotlin...",
+                titleKy = "Kotlin тилинде код жаз...",
+                titleEn = "Write Kotlin code...",
+                promptRu = "Напиши чистый современный код на Kotlin Jetpack Compose с анимацией Liquid Glass и объясни архитектуру.",
+                promptKy = "Kotlin Jetpack Compose аркылуу Liquid Glass анимациясы бар таза код жазып, архитектурасын түшүндүр.",
+                promptEn = "Write clean modern Kotlin Jetpack Compose code with a Liquid Glass animation and explain the architecture.",
+                icon = Icons.Default.Code,
+                accentColor = LiquidCyan
+            ),
+            QuickAiPromptChip(
+                titleRu = "Объясни сложную тему...",
+                titleKy = "Татаал теманы түшүндүр...",
+                titleEn = "Explain a complex topic...",
+                promptRu = "Объясни простыми словами и с яркими аналогиями, как работают трансформеры и квантовые вычисления.",
+                promptKy = "Трансформерлер жана кванттык эсептөөлөр кантип иштээрин жөнөкөй сөз менен түшүндүрүп бер.",
+                promptEn = "Explain how neural transformers and quantum computing work using simple, vivid analogies.",
+                icon = Icons.Default.School,
+                accentColor = AuroraViolet
+            ),
+            QuickAiPromptChip(
+                titleRu = "Придумай идею проекта...",
+                titleKy = "Долбоор идеясын ойлоп тап...",
+                titleEn = "Brainstorm a project idea...",
+                promptRu = "Придумай 3 уникальные идеи AI-стартапа на 2026 год со стеком технологий и планом запуска MVP.",
+                promptKy = "2026-жылга карата 3 уникалдуу AI-стартап идеясын технологиялык стеги менен ойлоп тап.",
+                promptEn = "Brainstorm 3 unique 2026 AI startup ideas with tech stack and MVP launch roadmap.",
+                icon = Icons.Default.Lightbulb,
+                accentColor = AuroraMagenta
+            ),
+            QuickAiPromptChip(
+                titleRu = "Переведи и улучши текст...",
+                titleKy = "Текстти которуп жакшырт...",
+                titleEn = "Translate & polish text...",
+                promptRu = "Помоги перевести и стилистически улучшить деловое сообщение на английский, русский и кыргызский языки.",
+                promptKy = "Ишкердик билдирүүнү англис, орус жана кыргыз тилдерине которуп, стилин жакшыртууга жардам бер.",
+                promptEn = "Help me translate and stylistically polish a professional message into English, Russian, and Kyrgyz.",
+                icon = Icons.Default.Translate,
+                accentColor = OnlineEmerald
+            )
+        )
+    }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "AiOrbPulse")
+    val orbPulse by infiniteTransition.animateFloat(
+        initialValue = 0.94f,
+        targetValue = 1.08f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2400, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
         ),
-        ServiceCardItemData(
-            id = "ai",
-            title = "Neongram AI",
-            description = tr(lang, "Умный ассистент в чатах для быстрых ответов", "Чаттардагы акылдуу жардамчы", "Smart chat assistant for quick answers"),
-            monogram = "AI",
-            accentColor = scheme.accent,
-            icon = Icons.Default.AutoAwesome,
-            onClick = { viewModel.openAiAssistantChat() }
+        label = "orbScale"
+    )
+    val haloRotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 12000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
         ),
-        ServiceCardItemData(
-            id = "browser",
-            title = tr(lang, "Браузер", "Браузер", "Browser"),
-            description = tr(lang, "Встроенный NWEB браузер с быстрым поиском", "Ички NWEB браузери", "Built-in NWEB browser with multi-engine search"),
-            monogram = "WEB",
-            accentColor = Color(0xFF5DA9FF),
-            icon = Icons.Default.Language,
-            onClick = { viewModel.navigateToOverlay(ActiveOverlayScreen.SERVICE_BROWSER) }
-        ),
-        ServiceCardItemData(
-            id = "currency",
-            title = tr(lang, "Крипта и валюты", "Крипто жана валюта", "Crypto & Currency"),
-            description = tr(lang, "Курсы BTC, ETH, TON, SOL и графики за 24ч", "BTC, ETH, TON, SOL курстары", "Live BTC, ETH, TON, SOL rates & 24h charts"),
-            monogram = "CRP",
-            accentColor = Color(0xFF4CAF50),
-            icon = Icons.Default.CurrencyBitcoin,
-            onClick = { viewModel.navigateToOverlay(ActiveOverlayScreen.SERVICE_CURRENCY) }
-        ),
-        ServiceCardItemData(
-            id = "music",
-            title = tr(lang, "Музыка", "Музыка", "Music"),
-            description = tr(lang, "Поиск треков, плейлисты и фоновый плеер", "Тректерди издөө жана плеер", "Search tracks, favorites & mini-player"),
-            monogram = "MUS",
-            accentColor = Color(0xFF8BC34A),
-            icon = Icons.Default.MusicNote,
-            onClick = { viewModel.navigateToOverlay(ActiveOverlayScreen.SERVICE_MUSIC) }
-        ),
-        ServiceCardItemData(
-            id = "games",
-            title = tr(lang, "Игры", "Оюндар", "Games"),
-            description = tr(lang, "Шахматы 8x8 и ретро-аркады прямо в мессенджере", "Шахмат 8x8 жана DOOM", "Interactive 8x8 Chess & retro DOOM"),
-            monogram = "GMS",
-            accentColor = Color(0xFF9C6DFF),
-            icon = Icons.Default.SportsEsports,
-            onClick = { viewModel.navigateToOverlay(ActiveOverlayScreen.SERVICE_GAMES) }
-        ),
-        ServiceCardItemData(
-            id = "wallet",
-            title = tr(lang, "TON Кошелек", "TON Капчык", "TON Wallet"),
-            description = tr(lang, "Подключение TON Connect, баланс и переводы", "TON Connect жана баланс", "TON Connect sessions, balance & transfers"),
-            monogram = "TON",
-            accentColor = Color(0xFFFFB300),
-            icon = Icons.Default.AccountBalanceWallet,
-            onClick = { viewModel.navigateToOverlay(ActiveOverlayScreen.SERVICE_WALLET) }
-        ),
-        ServiceCardItemData(
-            id = "bank",
-            title = "Neongram Bank",
-            description = tr(lang, "Виртуальная карта KGS и мгновенные переводы", "Виртуалдык KGS картасы", "Virtual KGS neon card & instant transfers"),
-            monogram = "PAY",
-            accentColor = Color(0xFF21B3A1),
-            icon = Icons.Default.AccountBalance,
-            onClick = { viewModel.navigateToOverlay(ActiveOverlayScreen.SERVICE_BANK) }
+        label = "haloRotation"
+    )
+
+    val glassSurfaceBrush = Brush.linearGradient(
+        colors = if (scheme.isDark) {
+            listOf(
+                scheme.surface.copy(alpha = 0.82f),
+                scheme.surfaceAlt.copy(alpha = 0.56f)
+            )
+        } else {
+            listOf(
+                scheme.surface.copy(alpha = 0.94f),
+                scheme.surfaceAlt.copy(alpha = 0.80f)
+            )
+        }
+    )
+
+    val specularCardBorder = Brush.linearGradient(
+        colors = listOf(
+            scheme.primary.copy(alpha = 0.55f),
+            Color.White.copy(alpha = if (scheme.isDark) 0.16f else 0.65f),
+            scheme.accent.copy(alpha = 0.55f)
         )
     )
 
-    PageScaffold(
-        title = tr(lang, "Сервисы", "Кызматтар", "Services")
-    ) {
-        cards.forEach { card ->
-            ServiceCardRow(item = card)
-        }
-    }
-}
-
-@Composable
-private fun ServiceCardRow(item: ServiceCardItemData) {
-    val scheme = LocalNeonScheme.current
-    Row(
+    Box(
         modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(scheme.surface)
-            .border(1.dp, scheme.border, RoundedCornerShape(20.dp))
-            .clickable(onClick = item.onClick)
-            .padding(14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp)
+            .fillMaxSize()
+            .background(scheme.bg)
     ) {
-        // 56.dp ServiceLogo with gradient, inner 34.dp icon box, and bottom-right monogram badge
-        Box(modifier = Modifier.size(56.dp)) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(
-                        Brush.linearGradient(
-                            colors = listOf(
-                                item.accentColor.copy(alpha = 0.28f),
-                                scheme.surfaceAlt
-                            )
-                        )
-                    )
-                    .border(1.dp, item.accentColor.copy(alpha = 0.45f), RoundedCornerShape(18.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(34.dp)
-                        .clip(RoundedCornerShape(11.dp))
-                        .background(item.accentColor.copy(alpha = 0.22f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = item.icon,
-                        contentDescription = item.title,
-                        tint = item.accentColor,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(scheme.bg)
-                    .border(1.dp, item.accentColor.copy(alpha = 0.7f), RoundedCornerShape(6.dp))
-                    .padding(horizontal = 4.dp, vertical = 1.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = item.monogram,
-                    color = item.accentColor,
-                    fontSize = 8.sp,
-                    fontWeight = FontWeight.ExtraBold
-                )
-            }
-        }
+        AnimatedNeonBackground()
 
         Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Text(
-                text = item.title,
-                color = scheme.text,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = item.description,
-                color = scheme.muted,
-                fontSize = 13.sp,
-                lineHeight = 17.sp,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-
-        Box(
             modifier = Modifier
-                .size(28.dp)
-                .clip(CircleShape)
-                .background(scheme.surfaceAlt)
-                .border(1.dp, scheme.border, CircleShape),
-            contentAlignment = Alignment.Center
+                .fillMaxSize()
+                .statusBarsPadding()
+                .verticalScroll(rememberScrollState())
+                .padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 120.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                tint = scheme.text,
-                modifier = Modifier.size(18.dp)
-            )
-        }
-    }
-}
-
-// ============================================================================
-// 1. WEATHER SERVICE SCREEN (`WeatherScreen.jsx`)
-// ============================================================================
-
-@Composable
-fun WeatherServiceScreen(
-    state: NeongramUiState,
-    viewModel: NeongramViewModel
-) {
-    val scheme = LocalNeonScheme.current
-    val lang = state.session.language
-    val weather = state.weatherData
-    var cityQuery by remember { mutableStateOf("") }
-
-    PageScaffold(
-        title = tr(lang, "Погода", "Аба ырайы", "Weather"),
-        onBack = { viewModel.navigateBack() },
-        rightContent = {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(scheme.surface)
-                    .border(1.dp, scheme.border, RoundedCornerShape(999.dp))
-                    .clickable {
-                        viewModel.loadWeather(weather.cityName, weather.latitude, weather.longitude)
-                    }
-                    .padding(horizontal = 8.dp, vertical = 5.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Refresh,
-                    contentDescription = "Refresh",
-                    tint = scheme.primary,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-        }
-    ) {
-        // City Search Row
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            NeonInput(
-                value = cityQuery,
-                onValueChange = { cityQuery = it },
-                placeholder = tr(lang, "Введите город (например, Bishkek)", "Шаарды жазыңыз", "Search city (e.g. Bishkek)"),
-                modifier = Modifier.weight(1f)
-            )
-            Box(
-                modifier = Modifier
-                    .height(48.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(scheme.primary)
-                    .clickable {
-                        if (cityQuery.isNotBlank()) {
-                            viewModel.searchAndLoadWeatherCity(cityQuery.trim())
-                        }
-                    }
-                    .padding(horizontal = 16.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = tr(lang, "Найти", "Издөө", "Find"),
-                    color = if (scheme.isDark) Color(0xFF06070C) else Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp
-                )
-            }
-        }
-
-        // WeatherNowCard with gradient & 54.sp temperature
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(22.dp))
-                .background(
-                    Brush.linearGradient(
-                        colors = listOf(
-                            scheme.primary.copy(alpha = 0.25f),
-                            scheme.accent.copy(alpha = 0.22f),
-                            scheme.surface
-                        )
-                    )
-                )
-                .border(1.dp, scheme.primary.copy(alpha = 0.45f), RoundedCornerShape(22.dp))
-                .padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
+            // Top Liquid Glass Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Column {
                     Text(
-                        text = weather.cityName,
+                        text = "Neongram AI",
                         color = scheme.text,
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.ExtraBold
+                        fontSize = 34.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = (-0.5).sp
                     )
                     Text(
-                        text = weatherCodeLabel(weather.weatherCode, lang),
-                        color = scheme.primary,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-                Icon(
-                    imageVector = Icons.Default.WbSunny,
-                    contentDescription = null,
-                    tint = scheme.primary,
-                    modifier = Modifier.size(38.dp)
-                )
-            }
-
-            Text(
-                text = String.format(Locale.US, "%.1f°C", weather.tempCurrent),
-                color = scheme.text,
-                fontSize = 54.sp,
-                fontWeight = FontWeight.Black
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                WeatherStatPill(
-                    label = tr(lang, "Ощущается", "Сезилет", "Feels like"),
-                    value = String.format(Locale.US, "%.1f°C", weather.feelsLike)
-                )
-                WeatherStatPill(
-                    label = tr(lang, "Ветер", "Шамал", "Wind"),
-                    value = String.format(Locale.US, "%.1f м/с", weather.windSpeed)
-                )
-                WeatherStatPill(
-                    label = tr(lang, "Влажность", "Нымдуулук", "Humidity"),
-                    value = "${weather.humidity}%"
-                )
-            }
-        }
-
-        // 24-hour horizontal forecast strip
-        Text(
-            text = tr(lang, "Почасовой прогноз (24ч)", "Сааттык божомол (24с)", "24-Hour Forecast"),
-            color = scheme.text,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold
-        )
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            val hourlyList = weather.hourlyTemps.ifEmpty {
-                listOf(
-                    "09:00" to weather.tempCurrent,
-                    "12:00" to (weather.tempCurrent + 2.0),
-                    "15:00" to (weather.tempCurrent + 3.0),
-                    "18:00" to (weather.tempCurrent + 1.0),
-                    "21:00" to (weather.tempCurrent - 1.5),
-                    "00:00" to (weather.tempCurrent - 3.0)
-                )
-            }
-            hourlyList.forEach { (hour, temp) ->
-                Column(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(scheme.surface)
-                        .border(1.dp, scheme.border, RoundedCornerShape(14.dp))
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text(
-                        text = hour.takeLast(5),
+                        text = tr(
+                            lang,
+                            "Эксклюзивный нейро-хаб • Liquid Intelligence",
+                            "Эксклюзивдүү нейро-хаб • Liquid Intelligence",
+                            "Exclusive Neural Hub • Liquid Intelligence"
+                        ),
                         color = scheme.muted,
-                        fontSize = 12.sp
-                    )
-                    Text(
-                        text = String.format(Locale.US, "%.0f°", temp),
-                        color = scheme.text,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
                     )
                 }
-            }
-        }
 
-        // 7-day forecast list
-        Text(
-            text = tr(lang, "Прогноз на 7 дней", "7 күндүк божомол", "7-Day Forecast"),
-            color = scheme.text,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold
-        )
-
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
-                .background(scheme.surface)
-                .border(1.dp, scheme.border, RoundedCornerShape(18.dp))
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            if (weather.dailyForecast.isEmpty()) {
-                Text(
-                    text = tr(lang, "Загрузка прогноза...", "Жүктөлүүдө...", "Loading forecast..."),
-                    color = scheme.muted,
-                    fontSize = 13.sp
-                )
-            } else {
-                weather.dailyForecast.forEach { day ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = day.date,
-                            color = scheme.text,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Text(
-                            text = weatherCodeLabel(day.weatherCode, lang),
-                            color = scheme.muted,
-                            fontSize = 13.sp,
-                            modifier = Modifier.weight(1f),
-                            textAlign = TextAlign.Center
-                        )
-                        Text(
-                            text = String.format(Locale.US, "%.0f° / %.0f°", day.tempMax, day.tempMin),
-                            color = scheme.primary,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.weight(0.8f),
-                            textAlign = TextAlign.End
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun WeatherStatPill(label: String, value: String) {
-    val scheme = LocalNeonScheme.current
-    Column(
-        modifier = Modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(scheme.bg.copy(alpha = 0.45f))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(text = label, color = scheme.muted, fontSize = 11.sp)
-        Text(text = value, color = scheme.text, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-    }
-}
-
-private fun weatherCodeLabel(code: Int, lang: String): String {
-    return when (code) {
-        0 -> tr(lang, "Ясно", "Ачык", "Clear sky")
-        1, 2, 3 -> tr(lang, "Переменная облачность", "Ала булуттуу", "Partly cloudy")
-        45, 48 -> tr(lang, "Туман", "Туман", "Fog")
-        51, 53, 55, 61, 63, 65 -> tr(lang, "Дождь", "Жамгыр", "Rain")
-        71, 73, 75 -> tr(lang, "Снег", "Кар", "Snow")
-        95, 96, 99 -> tr(lang, "Гроза", "Чагылган", "Thunderstorm")
-        else -> tr(lang, "Облачно", "Булуттуу", "Cloudy")
-    }
-}
-
-// ============================================================================
-// 2. CURRENCY & CRYPTO SERVICE SCREEN (`CurrencyScreen.jsx`)
-// ============================================================================
-
-@Composable
-fun CurrencyServiceScreen(
-    state: NeongramUiState,
-    viewModel: NeongramViewModel
-) {
-    val scheme = LocalNeonScheme.current
-    val lang = state.session.language
-    var query by remember { mutableStateOf("") }
-    var selectedCoin by remember { mutableStateOf<CryptoCoinRate?>(null) }
-
-    val defaultCoins = remember {
-        listOf(
-            CryptoCoinRate("bitcoin", "BTC", "Bitcoin", 89420.50, 3.42),
-            CryptoCoinRate("ethereum", "ETH", "Ethereum", 3120.80, 1.85),
-            CryptoCoinRate("binancecoin", "BNB", "BNB", 645.10, -0.74),
-            CryptoCoinRate("solana", "SOL", "Solana", 192.40, 5.18),
-            CryptoCoinRate("the-open-network", "TON", "Toncoin", 5.84, 4.12),
-            CryptoCoinRate("ripple", "XRP", "XRP", 1.48, -1.20),
-            CryptoCoinRate("dogecoin", "DOGE", "Dogecoin", 0.37, 6.40),
-            CryptoCoinRate("cardano", "ADA", "Cardano", 0.98, 2.15)
-        )
-    }
-
-    val allCoins = state.cryptoRates.ifEmpty { defaultCoins }
-    val popularSymbols = setOf("BTC", "ETH", "BNB", "SOL", "TON", "XRP", "DOGE", "ADA")
-    val filteredCoins = remember(allCoins, query) {
-        val q = query.trim().lowercase()
-        if (q.isEmpty()) allCoins else allCoins.filter {
-            it.symbol.lowercase().contains(q) || it.name.lowercase().contains(q)
-        }
-    }
-    val popularCoins = filteredCoins.filter { it.symbol.uppercase() in popularSymbols }.take(8)
-
-    PageScaffold(
-        title = tr(lang, "Крипта и валюты", "Крипто жана валюта", "Crypto & Rates"),
-        onBack = { viewModel.navigateBack() },
-        rightContent = {
-            Icon(
-                imageVector = Icons.Default.Refresh,
-                contentDescription = "Refresh",
-                tint = scheme.primary,
-                modifier = Modifier
-                    .size(22.dp)
-                    .clickable { viewModel.loadCryptoRates() }
-            )
-        }
-    ) {
-        NeonInput(
-            value = query,
-            onValueChange = { query = it },
-            placeholder = tr(lang, "Поиск монеты (BTC, TON, SOL...)", "Монета издөө...", "Search coin (BTC, TON, SOL...)")
-        )
-
-        Text(
-            text = tr(lang, "Популярные", "Популярдуу", "Popular"),
-            color = scheme.text,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold
-        )
-
-        // 2-Column Popular Grid
-        popularCoins.chunked(2).forEach { pair ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                pair.forEach { coin ->
-                    val isPositive = coin.change24hPercent >= 0.0
-                    val changeColor = if (isPositive) Color(0xFF31C06A) else Color(0xFFE74C5B)
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(scheme.surface)
-                            .border(1.dp, scheme.border, RoundedCornerShape(16.dp))
-                            .clickable { selectedCoin = coin }
-                            .padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = coin.symbol,
-                                color = scheme.text,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.ExtraBold
-                            )
-                            Text(
-                                text = String.format(
-                                    Locale.US,
-                                    "%s%.2f%%",
-                                    if (isPositive) "+" else "",
-                                    coin.change24hPercent
-                                ),
-                                color = changeColor,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        Text(
-                            text = coin.name,
-                            color = scheme.muted,
-                            fontSize = 12.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = formatUsdPrice(coin.currentPriceUsd),
-                            color = scheme.primary,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-                if (pair.size == 1) {
-                    Spacer(modifier = Modifier.weight(1f))
-                }
-            }
-        }
-
-        Text(
-            text = tr(lang, "Все курсы", "Бардык курстар", "All Rates"),
-            color = scheme.text,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold
-        )
-
-        filteredCoins.forEach { coin ->
-            val isPositive = coin.change24hPercent >= 0.0
-            val changeColor = if (isPositive) Color(0xFF31C06A) else Color(0xFFE74C5B)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(scheme.surface)
-                    .border(1.dp, scheme.border, RoundedCornerShape(14.dp))
-                    .clickable { selectedCoin = coin }
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
+                // Live Neural Status Pill
                 Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(
+                            Brush.linearGradient(
+                                colors = listOf(
+                                    scheme.primary.copy(alpha = 0.18f),
+                                    scheme.accent.copy(alpha = 0.24f)
+                                )
+                            )
+                        )
+                        .border(
+                            width = 1.dp,
+                            brush = Brush.linearGradient(
+                                colors = listOf(scheme.primary, scheme.accent)
+                            ),
+                            shape = RoundedCornerShape(999.dp)
+                        )
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(38.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(scheme.surfaceAlt),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = coin.symbol.take(3),
-                            color = scheme.primary,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.ExtraBold
-                        )
-                    }
-                    Column {
-                        Text(
-                            text = coin.name,
-                            color = scheme.text,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = coin.symbol,
-                            color = scheme.muted,
-                            fontSize = 12.sp
-                        )
-                    }
-                }
-                Column(horizontalAlignment = Alignment.End) {
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(OnlineEmerald)
+                    )
                     Text(
-                        text = formatUsdPrice(coin.currentPriceUsd),
+                        text = "AI ONLINE",
                         color = scheme.text,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = String.format(
-                            Locale.US,
-                            "%s%.2f%%",
-                            if (isPositive) "+" else "",
-                            coin.change24hPercent
-                        ),
-                        color = changeColor,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = 0.6.sp
                     )
                 }
             }
-        }
-    }
 
-    // Interactive Canvas Price Chart Modal
-    selectedCoin?.let { coin ->
-        val isPositive = coin.change24hPercent >= 0.0
-        val lineColor = if (isPositive) Color(0xFF31C06A) else Color(0xFFE74C5B)
-        var timeframe by remember { mutableStateOf("24H") }
-
-        val points = remember(coin, timeframe) {
-            val base = coin.currentPriceUsd.toFloat().coerceAtLeast(0.01f)
-            val seed = coin.symbol.hashCode() + timeframe.hashCode()
-            List(16) { idx ->
-                val wave = kotlin.math.sin((idx + seed % 7) * 0.75f) * 0.03f
-                val trend = (idx - 8) * (coin.change24hPercent.toFloat() / 100f) * 0.08f
-                base * (1f + wave + trend)
-            }
-        }
-
-        Dialog(onDismissRequest = { selectedCoin = null }) {
+            // ====================================================================
+            // 1. FLOATING AI ORB HERO CARD (RoundedCornerShape(32.dp), 1.2.dp cyan-to-violet specular border)
+            // ====================================================================
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(22.dp))
-                    .background(scheme.surface)
-                    .border(1.dp, scheme.border, RoundedCornerShape(22.dp))
-                    .padding(18.dp),
+                    .clip(RoundedCornerShape(32.dp))
+                    .background(
+                        Brush.linearGradient(
+                            colors = if (scheme.isDark) {
+                                listOf(
+                                    Color(0xFF171C36).copy(alpha = 0.90f),
+                                    Color(0xFF1E153A).copy(alpha = 0.84f),
+                                    Color(0xFF11162B).copy(alpha = 0.92f)
+                                )
+                            } else {
+                                listOf(
+                                    Color(0xFFFFFFFF).copy(alpha = 0.95f),
+                                    Color(0xFFF0F4FF).copy(alpha = 0.92f),
+                                    Color(0xFFF5EEFF).copy(alpha = 0.90f)
+                                )
+                            }
+                        )
+                    )
+                    .border(
+                        width = 1.2.dp,
+                        brush = Brush.linearGradient(
+                            colors = listOf(
+                                LiquidCyan,
+                                Color.White.copy(alpha = 0.75f),
+                                AuroraViolet,
+                                AuroraMagenta
+                            )
+                        ),
+                        shape = RoundedCornerShape(32.dp)
+                    )
+                    .padding(22.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
+                // Animated Glowing AI Core Orb (76.dp circle with radial cyan/violet/magenta glow + AutoAwesome sparkles icon)
+                Box(
+                    modifier = Modifier.size(92.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    // Outer pulsing aura
+                    Box(
+                        modifier = Modifier
+                            .size(90.dp)
+                            .scale(orbPulse)
+                            .clip(CircleShape)
+                            .background(
+                                Brush.radialGradient(
+                                    colors = listOf(
+                                        LiquidCyan.copy(alpha = 0.42f),
+                                        AuroraViolet.copy(alpha = 0.28f),
+                                        AuroraMagenta.copy(alpha = 0.12f),
+                                        Color.Transparent
+                                    )
+                                )
+                            )
+                    )
+
+                    // Core 76.dp AI Orb
+                    Box(
+                        modifier = Modifier
+                            .size(76.dp)
+                            .clip(CircleShape)
+                            .background(
+                                Brush.radialGradient(
+                                    colors = listOf(
+                                        LiquidCyan,
+                                        AuroraViolet,
+                                        AuroraMagenta
+                                    )
+                                )
+                            )
+                            .border(
+                                width = 2.dp,
+                                brush = Brush.sweepGradient(
+                                    colors = listOf(
+                                        Color.White.copy(alpha = 0.9f),
+                                        LiquidCyan,
+                                        AuroraViolet,
+                                        AuroraMagenta,
+                                        Color.White.copy(alpha = 0.9f)
+                                    )
+                                ),
+                                shape = CircleShape
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AutoAwesome,
+                            contentDescription = "Neongram AI Orb",
+                            tint = Color.White,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .rotate(haloRotation * 0.05f)
+                        )
+                    }
+                }
+
+                // Title "Neongram AI" (28.sp, ExtraBold) + Subtitle
+                Text(
+                    text = "Neongram AI",
+                    color = scheme.text,
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    textAlign = TextAlign.Center,
+                    letterSpacing = (-0.3).sp
+                )
+
+                Text(
+                    text = tr(
+                        lang,
+                        "Ваш персональный нейро-ассистент в реальном времени",
+                        "Сиздин реалдуу убакыттагы жеке нейро-жардамчыңыз",
+                        "Your personal real-time neural assistant"
+                    ),
+                    color = scheme.muted,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center,
+                    lineHeight = 20.sp
+                )
+
+                // Active Model + Persona Status Badges
+                val currentModelObj = aiModels.firstOrNull { it.id == selectedModel } ?: aiModels.first()
+                val currentPersonaObj = aiPersonas.firstOrNull { it.id == selectedMode } ?: aiPersonas.first()
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(currentModelObj.accentColor.copy(alpha = 0.16f))
+                            .border(1.dp, currentModelObj.accentColor.copy(alpha = 0.55f), RoundedCornerShape(999.dp))
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
                         Text(
-                            text = "${coin.name} (${coin.symbol})",
+                            text = tr(lang, currentModelObj.titleRu, currentModelObj.titleKy, currentModelObj.titleEn),
                             color = scheme.text,
-                            fontSize = 18.sp,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(currentPersonaObj.accentColor.copy(alpha = 0.16f))
+                            .border(1.dp, currentPersonaObj.accentColor.copy(alpha = 0.55f), RoundedCornerShape(999.dp))
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
                         Text(
-                            text = formatUsdPrice(coin.currentPriceUsd),
-                            color = scheme.primary,
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.ExtraBold
+                            text = tr(lang, currentPersonaObj.titleRu, currentPersonaObj.titleKy, currentPersonaObj.titleEn),
+                            color = scheme.text,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
                         )
                     }
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Close",
-                        tint = scheme.muted,
-                        modifier = Modifier
-                            .size(22.dp)
-                            .clickable { selectedCoin = null }
-                    )
                 }
 
-                // Timeframe selector pills
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    listOf("24H", "7D", "30D", "1Y").forEach { tf ->
-                        val active = timeframe == tf
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(if (active) scheme.primary else scheme.surfaceAlt)
-                                .clickable { timeframe = tf }
-                                .padding(vertical = 6.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = tf,
-                                color = if (active) Color(0xFF06070C) else scheme.text,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
+                Spacer(modifier = Modifier.height(2.dp))
 
-                // Price Line Chart Canvas
+                // Direct Prompt Capsule Input (NeonInput)
+                NeonInput(
+                    value = promptInput,
+                    onValueChange = { promptInput = it },
+                    placeholder = tr(
+                        lang,
+                        "Задайте любой вопрос или задачу для AI...",
+                        "AI үчүн каалаган суроо же тапшырма жазыңыз...",
+                        "Ask anything or describe a task for AI..."
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                // "Спросить Neongram AI" Gradient Button
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(160.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(scheme.bgAlt)
-                        .border(1.dp, scheme.border, RoundedCornerShape(16.dp))
-                        .padding(12.dp)
-                ) {
-                    Canvas(modifier = Modifier.fillMaxSize()) {
-                        val minV = points.minOrNull() ?: 0f
-                        val maxV = points.maxOrNull() ?: 1f
-                        val range = (maxV - minV).coerceAtLeast(0.0001f)
-                        val path = Path()
-                        points.forEachIndexed { i, v ->
-                            val x = (i.toFloat() / (points.size - 1)) * size.width
-                            val y = size.height - ((v - minV) / range) * size.height
-                            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
-                        }
-                        drawPath(
-                            path = path,
-                            color = lineColor,
-                            style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
-                        )
-                    }
-                }
-
-                PrimaryButton(
-                    label = tr(lang, "Закрыть", "Жабуу", "Close"),
-                    onClick = { selectedCoin = null }
-                )
-            }
-        }
-    }
-}
-
-private fun formatUsdPrice(price: Double): String {
-    return if (price >= 1.0) {
-        String.format(Locale.US, "$%,.2f", price)
-    } else {
-        String.format(Locale.US, "$%.4f", price)
-    }
-}
-
-// ============================================================================
-// 3. MUSIC SERVICE SCREEN (`MusicScreen.jsx`)
-// ============================================================================
-
-@Composable
-fun MusicServiceScreen(
-    state: NeongramUiState,
-    viewModel: NeongramViewModel
-) {
-    val scheme = LocalNeonScheme.current
-    val lang = state.session.language
-
-    var selectedTab by remember { mutableIntStateOf(0) }
-    var searchQuery by remember { mutableStateOf("Phonk Neon") }
-    var activeTrack by remember { mutableStateOf<MusicTrackDto?>(null) }
-    var isPlaying by remember { mutableStateOf(false) }
-    val localFavorites = remember { mutableStateListOf<MusicTrackDto>() }
-
-    val fallbackTracks = remember {
-        listOf(
-            MusicTrackDto("neon_1", "CYBERPUNK OVERDRIVE", "Neongram Synthwave", null, "3:24"),
-            MusicTrackDto("neon_2", "BISHKEK NIGHT DRIFT", "Kyrgyz Phonk Collective", null, "2:48"),
-            MusicTrackDto("neon_3", "NEON HORIZON 2099", "Astra Pulse", null, "4:05"),
-            MusicTrackDto("neon_4", "MATRIX PROTOCOL", "Darkwave Core", null, "3:12")
-        )
-    }
-
-    val tracksToShow = if (selectedTab == 0) {
-        state.musicTracks.ifEmpty { fallbackTracks }
-    } else {
-        (state.musicFavorites + localFavorites).distinctBy { it.videoId }.ifEmpty { fallbackTracks.take(2) }
-    }
-
-    PageScaffold(
-        title = tr(lang, "Музыка", "Музыка", "Music"),
-        onBack = { viewModel.navigateBack() }
-    ) {
-        // 2 Tabs: Поиск / Библиотека
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(scheme.surface)
-                .border(1.dp, scheme.border, RoundedCornerShape(14.dp))
-                .padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            listOf(
-                tr(lang, "Поиск", "Издөө", "Search"),
-                tr(lang, "Библиотека", "Китепкана", "Library")
-            ).forEachIndexed { idx, title ->
-                val active = selectedTab == idx
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .heightIn(min = 38.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(if (active) scheme.primary else Color.Transparent)
-                        .clickable { selectedTab = idx },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = title,
-                        color = if (active) Color(0xFF06070C) else scheme.text,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-        }
-
-        if (selectedTab == 0) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                NeonInput(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = tr(lang, "Поиск треков...", "Трек издөө...", "Search tracks..."),
-                    modifier = Modifier.weight(1f)
-                )
-                Box(
-                    modifier = Modifier
-                        .height(48.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(scheme.primary)
-                        .clickable { viewModel.loadMusic(searchQuery) }
-                        .padding(horizontal = 14.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = "Search",
-                        tint = Color(0xFF06070C)
-                    )
-                }
-            }
-        }
-
-        // Track Cards
-        tracksToShow.forEach { track ->
-            val isCurrent = activeTrack?.videoId == track.videoId
-            val isFav = localFavorites.any { it.videoId == track.videoId } ||
-                state.musicFavorites.any { it.videoId == track.videoId }
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(if (isCurrent) scheme.surfaceAlt else scheme.surface)
-                    .border(
-                        1.dp,
-                        if (isCurrent) scheme.primary else scheme.border,
-                        RoundedCornerShape(16.dp)
-                    )
-                    .clickable {
-                        if (isCurrent) {
-                            isPlaying = !isPlaying
-                        } else {
-                            activeTrack = track
-                            isPlaying = true
-                        }
-                    }
-                    .padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                // 58.dp thumbnail
-                Box(
-                    modifier = Modifier
-                        .size(58.dp)
-                        .clip(RoundedCornerShape(14.dp))
+                        .heightIn(min = 54.dp)
+                        .clip(RoundedCornerShape(22.dp))
                         .background(
                             Brush.linearGradient(
-                                colors = listOf(scheme.accent, scheme.primary)
+                                colors = listOf(
+                                    LiquidCyan,
+                                    AuroraViolet,
+                                    AuroraMagenta
+                                )
                             )
-                        ),
+                        )
+                        .border(
+                            width = 1.dp,
+                            brush = Brush.linearGradient(
+                                colors = listOf(
+                                    Color.White.copy(alpha = 0.75f),
+                                    Color.White.copy(alpha = 0.20f)
+                                )
+                            ),
+                            shape = RoundedCornerShape(22.dp)
+                        )
+                        .clickable {
+                            val promptToSend = promptInput
+                            promptInput = ""
+                            viewModel.askNeongramAi(state, promptToSend)
+                        }
+                        .padding(horizontal = 20.dp, vertical = 14.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (!track.thumbnailUrl.isNullOrBlank()) {
-                        AsyncImage(
-                            model = track.thumbnailUrl,
-                            contentDescription = track.title,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    } else {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
                         Icon(
-                            imageVector = Icons.Default.MusicNote,
+                            imageVector = Icons.Default.AutoAwesome,
                             contentDescription = null,
                             tint = Color.White,
-                            modifier = Modifier.size(26.dp)
+                            modifier = Modifier.size(20.dp)
                         )
-                    }
-                }
-
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Text(
-                        text = track.title,
-                        color = scheme.text,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = track.channelTitle.ifBlank { "Neongram Audio" },
-                        color = scheme.muted,
-                        fontSize = 13.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    if (!track.durationText.isNullOrBlank()) {
                         Text(
-                            text = track.durationText,
-                            color = scheme.primary,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-
-                Icon(
-                    imageVector = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                    contentDescription = "Favorite",
-                    tint = if (isFav) scheme.danger else scheme.muted,
-                    modifier = Modifier
-                        .size(22.dp)
-                        .clickable {
-                            if (localFavorites.any { it.videoId == track.videoId }) {
-                                localFavorites.removeAll { it.videoId == track.videoId }
-                            } else {
-                                localFavorites.add(track)
-                            }
-                        }
-                )
-
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(scheme.primary),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = if (isCurrent && isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = "Play",
-                        tint = Color(0xFF06070C),
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-        }
-
-        // Mini-Player Bar
-        activeTrack?.let { current ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(
-                        Brush.linearGradient(
-                            colors = listOf(scheme.surfaceAlt, scheme.surface)
-                        )
-                    )
-                    .border(1.dp, scheme.primary, RoundedCornerShape(18.dp))
-                    .padding(14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = tr(lang, "Сейчас играет", "Азыр ойноп жатат", "Now Playing"),
-                        color = scheme.primary,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = current.title,
-                        color = scheme.text,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = current.channelTitle,
-                        color = scheme.muted,
-                        fontSize = 12.sp,
-                        maxLines = 1
-                    )
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .background(scheme.primary)
-                            .clickable { isPlaying = !isPlaying },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = "Toggle Play",
-                            tint = Color(0xFF06070C)
-                        )
-                    }
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .background(scheme.surface)
-                            .border(1.dp, scheme.border, CircleShape)
-                            .clickable {
-                                isPlaying = false
-                                activeTrack = null
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Stop",
-                            tint = scheme.muted
+                            text = tr(
+                                lang,
+                                "Спросить Neongram AI",
+                                "Neongram AI'ден суроо",
+                                "Ask Neongram AI"
+                            ),
+                            color = Color.White,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = 0.2.sp
                         )
                     }
                 }
             }
-        }
-    }
-}
 
-// ============================================================================
-// 4. GAMES SERVICE SCREEN (`GamesScreen.jsx`)
-// ============================================================================
-
-@Composable
-fun GamesServiceScreen(
-    state: NeongramUiState,
-    viewModel: NeongramViewModel
-) {
-    val scheme = LocalNeonScheme.current
-    val lang = state.session.language
-    var showChessModal by remember { mutableStateOf(false) }
-    var showDoomModal by remember { mutableStateOf(false) }
-
-    PageScaffold(
-        title = tr(lang, "Игры", "Оюндар", "Games"),
-        onBack = { viewModel.navigateBack() }
-    ) {
-        // 1. Шахматы Card
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(20.dp))
-                .background(scheme.surface)
-                .border(1.dp, scheme.border, RoundedCornerShape(20.dp))
-                .padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0xFF9C6DFF).copy(alpha = 0.22f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(text = "♞", fontSize = 26.sp, color = Color(0xFF9C6DFF))
-                }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = tr(lang, "Шахматы", "Шахмат", "Chess 8x8"),
-                        color = scheme.text,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = tr(
-                            lang,
-                            "Интерактивная доска 8x8 для партии с другом или тренировок",
-                            "Интерактивдүү 8x8 шахмат тактасы",
-                            "Interactive 8x8 chessboard right inside Neongram"
-                        ),
-                        color = scheme.muted,
-                        fontSize = 13.sp
-                    )
-                }
-            }
-            PrimaryButton(
-                label = tr(lang, "Играть в Шахматы", "Шахмат ойноо", "Play Chess"),
-                onClick = { showChessModal = true }
-            )
-        }
-
-        // 2. DOOM Card
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(20.dp))
-                .background(scheme.surface)
-                .border(1.dp, scheme.border, RoundedCornerShape(20.dp))
-                .padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(scheme.danger.copy(alpha = 0.22f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.SportsEsports,
-                        contentDescription = "DOOM",
-                        tint = scheme.danger,
-                        modifier = Modifier.size(26.dp)
-                    )
-                }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "DOOM",
-                        color = scheme.text,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.ExtraBold
-                    )
-                    Text(
-                        text = tr(
-                            lang,
-                            "Классический ретро-шутер в киберпанк оболочке Neongram",
-                            "Классикалык ретро-шутер",
-                            "Classic retro shooter inside Neongram arcade"
-                        ),
-                        color = scheme.muted,
-                        fontSize = 13.sp
-                    )
-                }
-            }
-            PrimaryButton(
-                label = tr(lang, "Запустить DOOM", "DOOM иштетүү", "Launch DOOM"),
-                onClick = { showDoomModal = true }
-            )
-        }
-    }
-
-    // Playable Interactive 8x8 Chessboard Modal
-    if (showChessModal) {
-        val initialBoard = remember {
-            listOf(
-                listOf("♜", "♞", "♝", "♛", "♚", "♝", "♞", "♜"),
-                listOf("♟", "♟", "♟", "♟", "♟", "♟", "♟", "♟"),
-                listOf("", "", "", "", "", "", "", ""),
-                listOf("", "", "", "", "", "", "", ""),
-                listOf("", "", "", "", "", "", "", ""),
-                listOf("", "", "", "", "", "", "", ""),
-                listOf("♙", "♙", "♙", "♙", "♙", "♙", "♙", "♙"),
-                listOf("♖", "♘", "♗", "♕", "♔", "♗", "♘", "♖")
-            )
-        }
-        var board by remember { mutableStateOf(initialBoard) }
-        var selectedCell by remember { mutableStateOf<Pair<Int, Int>?>(null) }
-        var whiteTurn by remember { mutableStateOf(true) }
-
-        Dialog(onDismissRequest = { showChessModal = false }) {
+            // ====================================================================
+            // 2. AI MODEL SELECTOR GLASS CARD (RoundedCornerShape(26.dp))
+            // ====================================================================
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(22.dp))
-                    .background(scheme.surface)
-                    .border(1.dp, scheme.border, RoundedCornerShape(22.dp))
-                    .padding(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
+                    .clip(RoundedCornerShape(26.dp))
+                    .background(glassSurfaceBrush)
+                    .border(1.dp, specularCardBorder, RoundedCornerShape(26.dp))
+                    .padding(18.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Row(
@@ -2034,982 +1758,402 @@ fun GamesServiceScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = if (whiteTurn) {
-                            tr(lang, "Шахматы • Ход белых", "Шахмат • Актардын жүрүшү", "Chess • White's turn")
-                        } else {
-                            tr(lang, "Шахматы • Ход черных", "Шахмат • Каралардын жүрүшү", "Chess • Black's turn")
-                        },
+                        text = tr(lang, "Нейросетевая модель", "Нейротармак модели", "Neural Model"),
                         color = scheme.text,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.ExtraBold
                     )
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Close",
-                        tint = scheme.muted,
-                        modifier = Modifier
-                            .size(22.dp)
-                            .clickable { showChessModal = false }
+                    Text(
+                        text = "2026 Engine",
+                        color = scheme.primary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
                     )
                 }
 
-                Column(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .border(2.dp, scheme.primary, RoundedCornerShape(12.dp))
-                ) {
-                    for (r in 0 until 8) {
-                        Row {
-                            for (c in 0 until 8) {
-                                val isDarkSquare = (r + c) % 2 == 1
-                                val isSelected = selectedCell == (r to c)
-                                val bg = when {
-                                    isSelected -> scheme.primary.copy(alpha = 0.45f)
-                                    isDarkSquare -> scheme.surfaceAlt
-                                    else -> scheme.bgAlt
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    aiModels.forEach { model ->
+                        val isSelected = selectedModel == model.id
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(
+                                    if (isSelected) {
+                                        Brush.linearGradient(
+                                            colors = listOf(
+                                                model.accentColor.copy(alpha = 0.24f),
+                                                scheme.accent.copy(alpha = 0.18f)
+                                            )
+                                        )
+                                    } else {
+                                        Brush.linearGradient(
+                                            colors = listOf(
+                                                scheme.surfaceAlt.copy(alpha = 0.55f),
+                                                scheme.surface.copy(alpha = 0.40f)
+                                            )
+                                        )
+                                    }
+                                )
+                                .border(
+                                    width = if (isSelected) 1.4.dp else 1.dp,
+                                    brush = if (isSelected) {
+                                        Brush.linearGradient(
+                                            colors = listOf(
+                                                model.accentColor,
+                                                Color.White.copy(alpha = 0.65f),
+                                                scheme.accent
+                                            )
+                                        )
+                                    } else {
+                                        Brush.linearGradient(
+                                            colors = listOf(
+                                                scheme.border,
+                                                scheme.border.copy(alpha = 0.5f)
+                                            )
+                                        )
+                                    },
+                                    shape = RoundedCornerShape(20.dp)
+                                )
+                                .clickable {
+                                    viewModel.setAiModel(model.id)
+                                    val title = tr(lang, model.titleRu, model.titleKy, model.titleEn)
+                                    viewModel.showToast(
+                                        tr(
+                                            lang,
+                                            "Модель: $title",
+                                            "Модель: $title",
+                                            "Model: $title"
+                                        )
+                                    )
                                 }
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .background(bg)
-                                        .clickable {
-                                            val currentSel = selectedCell
-                                            val pieceAtTarget = board[r][c]
-                                            if (currentSel == null) {
-                                                if (pieceAtTarget.isNotEmpty()) {
-                                                    selectedCell = r to c
-                                                }
-                                            } else if (currentSel == (r to c)) {
-                                                selectedCell = null
-                                            } else {
-                                                val movingPiece = board[currentSel.first][currentSel.second]
-                                                val mutable = board.map { it.toMutableList() }.toMutableList()
-                                                mutable[currentSel.first][currentSel.second] = ""
-                                                mutable[r][c] = movingPiece
-                                                board = mutable
-                                                selectedCell = null
-                                                whiteTurn = !whiteTurn
-                                            }
-                                        },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = board[r][c],
-                                        fontSize = 20.sp,
-                                        color = scheme.text
+                                .padding(horizontal = 16.dp, vertical = 13.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(
+                                    text = tr(lang, model.titleRu, model.titleKy, model.titleEn),
+                                    color = scheme.text,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = model.badge,
+                                    color = if (isSelected) model.accentColor else scheme.muted,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .size(26.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (isSelected) model.accentColor else scheme.surface
+                                    )
+                                    .border(
+                                        1.dp,
+                                        if (isSelected) Color.White.copy(alpha = 0.8f) else scheme.border,
+                                        CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (isSelected) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = null,
+                                        tint = Color(0xFF06070C),
+                                        modifier = Modifier.size(15.dp)
                                     )
                                 }
                             }
                         }
                     }
                 }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    PrimaryButton(
-                        label = tr(lang, "Сбросить партию", "Кайра баштоо", "Reset Board"),
-                        onClick = {
-                            board = initialBoard
-                            selectedCell = null
-                            whiteTurn = true
-                        }
-                    )
-                }
             }
-        }
-    }
 
-    if (showDoomModal) {
-        Dialog(onDismissRequest = { showDoomModal = false }) {
+            // ====================================================================
+            // 3. AI MODE / PERSONA SELECTOR GLASS CARD (RoundedCornerShape(26.dp)) — 2x2 Grid
+            // ====================================================================
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(22.dp))
-                    .background(scheme.surface)
-                    .border(1.dp, scheme.danger, RoundedCornerShape(22.dp))
+                    .clip(RoundedCornerShape(26.dp))
+                    .background(glassSurfaceBrush)
+                    .border(1.dp, specularCardBorder, RoundedCornerShape(26.dp))
                     .padding(18.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = tr(lang, "Режим и Персона AI", "AI Режими жана Персона", "AI Mode & Persona"),
+                        color = scheme.text,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                    Text(
+                        text = "2×2 Persona Grid",
+                        color = AuroraViolet,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                // 2x2 Grid of Frosted Glass Persona Cards
+                val rows = aiPersonas.chunked(2)
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    rows.forEach { rowItems ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            rowItems.forEach { persona ->
+                                val isSelected = selectedMode == persona.id
+                                Column(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .heightIn(min = 124.dp)
+                                        .clip(RoundedCornerShape(22.dp))
+                                        .background(
+                                            if (isSelected) {
+                                                Brush.linearGradient(
+                                                    colors = listOf(
+                                                        persona.accentColor.copy(alpha = 0.25f),
+                                                        scheme.accent.copy(alpha = 0.16f)
+                                                    )
+                                                )
+                                            } else {
+                                                Brush.linearGradient(
+                                                    colors = listOf(
+                                                        scheme.surfaceAlt.copy(alpha = 0.58f),
+                                                        scheme.surface.copy(alpha = 0.42f)
+                                                    )
+                                                )
+                                            }
+                                        )
+                                        .border(
+                                            width = if (isSelected) 1.5.dp else 1.dp,
+                                            brush = if (isSelected) {
+                                                Brush.linearGradient(
+                                                    colors = listOf(
+                                                        persona.accentColor,
+                                                        Color.White.copy(alpha = 0.7f),
+                                                        scheme.accent
+                                                    )
+                                                )
+                                            } else {
+                                                Brush.linearGradient(
+                                                    colors = listOf(
+                                                        scheme.border,
+                                                        scheme.border.copy(alpha = 0.5f)
+                                                    )
+                                                )
+                                            },
+                                            shape = RoundedCornerShape(22.dp)
+                                        )
+                                        .clickable {
+                                            viewModel.setAiMode(persona.id)
+                                            val title = tr(lang, persona.titleRu, persona.titleKy, persona.titleEn)
+                                            viewModel.showToast(
+                                                tr(
+                                                    lang,
+                                                    "Режим: $title",
+                                                    "Режим: $title",
+                                                    "Mode: $title"
+                                                )
+                                            )
+                                        }
+                                        .padding(14.dp),
+                                    verticalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(34.dp)
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .background(persona.accentColor.copy(alpha = 0.22f))
+                                                .border(
+                                                    1.dp,
+                                                    persona.accentColor.copy(alpha = 0.5f),
+                                                    RoundedCornerShape(12.dp)
+                                                ),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = persona.icon,
+                                                contentDescription = null,
+                                                tint = persona.accentColor,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+
+                                        if (isSelected) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(20.dp)
+                                                    .clip(CircleShape)
+                                                    .background(persona.accentColor),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Check,
+                                                    contentDescription = null,
+                                                    tint = Color(0xFF06070C),
+                                                    modifier = Modifier.size(12.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(8.dp))
+
+                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text(
+                                            text = tr(lang, persona.titleRu, persona.titleKy, persona.titleEn),
+                                            color = scheme.text,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = tr(lang, persona.subtitleRu, persona.subtitleKy, persona.subtitleEn),
+                                            color = scheme.muted,
+                                            fontSize = 11.sp,
+                                            lineHeight = 14.sp,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ====================================================================
+            // 4. QUICK AI PROMPTS GLASS CHIPS
+            // ====================================================================
+            Column(
+                modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text(
-                    text = "NEON DOOM ENGINE",
-                    color = scheme.danger,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Black
-                )
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(180.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0xFF090408))
-                        .border(1.dp, scheme.danger.copy(alpha = 0.5f), RoundedCornerShape(14.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "WAD READY • 60 FPS\nTAP FIRE TO START",
-                        color = scheme.danger,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 14.sp,
-                        textAlign = TextAlign.Center
-                    )
-                }
-                PrimaryButton(
-                    label = tr(lang, "Закрыть", "Жабуу", "Close"),
-                    onClick = { showDoomModal = false }
-                )
-            }
-        }
-    }
-}
-
-// ============================================================================
-// 5. TON WALLET SERVICE SCREEN (`WalletScreen.jsx`)
-// ============================================================================
-
-@Composable
-fun WalletServiceScreen(
-    state: NeongramUiState,
-    viewModel: NeongramViewModel
-) {
-    val scheme = LocalNeonScheme.current
-    val lang = state.session.language
-    var showConnectModal by remember { mutableStateOf(false) }
-    var customAddressInput by remember { mutableStateOf("") }
-    var activeBalanceTon by remember { mutableStateOf("0.00") }
-    var localWalletAddress by remember {
-        mutableStateOf(
-            state.walletSessions.firstOrNull()?.walletAddress ?: "UQNeongramTonWallet777CyberSpace"
-        )
-    }
-
-    PageScaffold(
-        title = tr(lang, "TON Кошелек", "TON Капчык", "TON Wallet"),
-        onBack = { viewModel.navigateBack() }
-    ) {
-        // TON Balance Card
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(22.dp))
-                .background(
-                    Brush.linearGradient(
-                        colors = listOf(
-                            Color(0xFF0098EA).copy(alpha = 0.30f),
-                            scheme.surface
-                        )
-                    )
-                )
-                .border(1.dp, Color(0xFF0098EA).copy(alpha = 0.55f), RoundedCornerShape(22.dp))
-                .padding(20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Text(
-                text = "TON MAINNET",
-                color = Color(0xFF0098EA),
-                fontSize = 12.sp,
-                fontWeight = FontWeight.ExtraBold,
-                letterSpacing = 1.sp
-            )
-            Text(
-                text = "$activeBalanceTon TON",
-                color = scheme.text,
-                fontSize = 36.sp,
-                fontWeight = FontWeight.Black
-            )
-            Text(
-                text = localWalletAddress,
-                color = scheme.muted,
-                fontSize = 12.sp,
-                fontFamily = FontFamily.Monospace,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            // 4 Action Circles: Отправить, Получить, Подписать, Отключить
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                WalletActionCircle(
-                    label = tr(lang, "Отправить", "Жөнөтүү", "Send"),
-                    icon = Icons.AutoMirrored.Filled.CallMade,
-                    onClick = { viewModel.showToast(tr(lang, "Отправка TON", "TON жөнөтүү", "Send TON")) }
-                )
-                WalletActionCircle(
-                    label = tr(lang, "Получить", "Алуу", "Receive"),
-                    icon = Icons.AutoMirrored.Filled.CallReceived,
-                    onClick = { showConnectModal = true }
-                )
-                WalletActionCircle(
-                    label = tr(lang, "Подписать", "Кол коюу", "Sign"),
-                    icon = Icons.Default.Edit,
-                    onClick = { viewModel.showToast(tr(lang, "Payload подписан", "Кол коюлду", "Payload signed")) }
-                )
-                WalletActionCircle(
-                    label = tr(lang, "Отключить", "Өчүрүү", "Disconnect"),
-                    icon = Icons.Default.LinkOff,
-                    onClick = {
-                        localWalletAddress = "Не подключен"
-                        viewModel.showToast(tr(lang, "Кошелек отключен", "Капчык өчүрүлдү", "Wallet disconnected"))
-                    }
-                )
-            }
-        }
-
-        PrimaryButton(
-            label = tr(lang, "Подключить TON Кошелек", "TON Капчыкты туташтыруу", "Connect TON Wallet"),
-            onClick = { showConnectModal = true }
-        )
-
-        // Linked Wallets Card
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
-                .background(scheme.surface)
-                .border(1.dp, scheme.border, RoundedCornerShape(18.dp))
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Text(
-                text = tr(lang, "Привязанные кошельки", "Байланган капчыктар", "Linked Wallets"),
-                color = scheme.text,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold
-            )
-
-            if (state.walletSessions.isEmpty()) {
-                Text(
                     text = tr(
                         lang,
-                        "Активных сессий TON Connect пока нет",
-                        "Активдүү TON Connect сессиялары жок",
-                        "No active TON Connect sessions"
+                        "Быстрые сценарии Neongram AI",
+                        "Neongram AI ыкчам сценарийлери",
+                        "Quick AI Prompts"
                     ),
-                    color = scheme.muted,
-                    fontSize = 13.sp
+                    color = scheme.text,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.ExtraBold
                 )
-            } else {
-                state.walletSessions.forEach { ws ->
+
+                quickPrompts.forEach { chip ->
+                    val title = tr(lang, chip.titleRu, chip.titleKy, chip.titleEn)
+                    val fullPrompt = tr(lang, chip.promptRu, chip.promptKy, chip.promptEn)
+
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(scheme.surfaceAlt)
-                            .padding(12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                            .clip(RoundedCornerShape(24.dp))
+                            .background(glassSurfaceBrush)
+                            .border(
+                                width = 1.dp,
+                                brush = Brush.linearGradient(
+                                    colors = listOf(
+                                        chip.accentColor.copy(alpha = 0.65f),
+                                        Color.White.copy(alpha = if (scheme.isDark) 0.15f else 0.60f),
+                                        scheme.accent.copy(alpha = 0.45f)
+                                    )
+                                ),
+                                shape = RoundedCornerShape(24.dp)
+                            )
+                            .clickable {
+                                viewModel.askNeongramAi(state, fullPrompt)
+                            }
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(RoundedCornerShape(15.dp))
+                                .background(
+                                    Brush.linearGradient(
+                                        colors = listOf(
+                                            chip.accentColor.copy(alpha = 0.26f),
+                                            scheme.accent.copy(alpha = 0.14f)
+                                        )
+                                    )
+                                )
+                                .border(
+                                    width = 1.dp,
+                                    color = chip.accentColor.copy(alpha = 0.55f),
+                                    shape = RoundedCornerShape(15.dp)
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = chip.icon,
+                                contentDescription = title,
+                                tint = chip.accentColor,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
                             Text(
-                                text = ws.walletName ?: ws.walletAppName ?: "TON Wallet",
+                                text = title,
                                 color = scheme.text,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = ws.walletAddress,
+                                text = fullPrompt,
                                 color = scheme.muted,
                                 fontSize = 12.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
-                        Text(
-                            text = ws.network.uppercase(),
-                            color = scheme.primary,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            }
-        }
-    }
 
-    if (showConnectModal) {
-        Dialog(onDismissRequest = { showConnectModal = false }) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(scheme.surface)
-                    .border(1.dp, scheme.border, RoundedCornerShape(20.dp))
-                    .padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(
-                    text = "TON Connect 2.0",
-                    color = scheme.text,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = tr(
-                        lang,
-                        "Введите адрес вашего кошелька Tonkeeper / MyTonWallet:",
-                        "Tonkeeper / MyTonWallet дарегин жазыңыз:",
-                        "Enter your Tonkeeper / MyTonWallet address:"
-                    ),
-                    color = scheme.muted,
-                    fontSize = 13.sp
-                )
-                NeonInput(
-                    value = customAddressInput,
-                    onValueChange = { customAddressInput = it },
-                    placeholder = "UQ..."
-                )
-                PrimaryButton(
-                    label = tr(lang, "Подключить", "Туташтыруу", "Connect"),
-                    onClick = {
-                        if (customAddressInput.isNotBlank()) {
-                            localWalletAddress = customAddressInput.trim()
-                        }
-                        showConnectModal = false
-                        viewModel.showToast(tr(lang, "TON кошелек подключен", "TON капчык туташты", "TON Wallet connected"))
-                    }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun WalletActionCircle(
-    label: String,
-    icon: ImageVector,
-    onClick: () -> Unit
-) {
-    val scheme = LocalNeonScheme.current
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-        modifier = Modifier.clickable(onClick = onClick)
-    ) {
-        Box(
-            modifier = Modifier
-                .size(46.dp)
-                .clip(CircleShape)
-                .background(scheme.surfaceAlt)
-                .border(1.dp, scheme.border, CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = label,
-                tint = scheme.primary,
-                modifier = Modifier.size(20.dp)
-            )
-        }
-        Text(
-            text = label,
-            color = scheme.text,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.SemiBold
-        )
-    }
-}
-
-// ============================================================================
-// 6. NEONGRAM BANK SERVICE SCREEN (`Bank` Mini-App)
-// ============================================================================
-
-private data class BankTransactionEntry(
-    val id: String,
-    val recipient: String,
-    val amountKgs: Double,
-    val timestamp: String,
-    val isIncoming: Boolean
-)
-
-@Composable
-fun BankServiceScreen(
-    state: NeongramUiState,
-    viewModel: NeongramViewModel
-) {
-    val scheme = LocalNeonScheme.current
-    val lang = state.session.language
-
-    var balanceKgs by remember { mutableStateOf(25400.0) }
-    var recipientInput by remember { mutableStateOf("") }
-    var amountInput by remember { mutableStateOf("") }
-    val transactions = remember {
-        mutableStateListOf(
-            BankTransactionEntry("tx_1", "@neo_merchant", 1250.0, "Сегодня, 14:20", false),
-            BankTransactionEntry("tx_2", "Пополнение Neongram Pay", 10000.0, "Вчера, 19:05", true),
-            BankTransactionEntry("tx_3", "@aibek_kg", 600.0, "18 Ноя, 11:30", false)
-        )
-    }
-
-    PageScaffold(
-        title = "Neongram Bank",
-        onBack = { viewModel.navigateBack() }
-    ) {
-        // Virtual Neon Card (KGS)
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(22.dp))
-                .background(
-                    Brush.linearGradient(
-                        colors = listOf(
-                            Color(0xFF21B3A1),
-                            scheme.accent,
-                            scheme.surfaceAlt
-                        )
-                    )
-                )
-                .border(1.dp, scheme.primary.copy(alpha = 0.6f), RoundedCornerShape(22.dp))
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "NEONGRAM PAY • VIRTUAL",
-                    color = Color.White.copy(alpha = 0.85f),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    letterSpacing = 1.sp
-                )
-                Text(
-                    text = "KGS",
-                    color = Color.White,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Black
-                )
-            }
-
-            Text(
-                text = String.format(Locale.US, "%,.2f KGS", balanceKgs),
-                color = Color.White,
-                fontSize = 32.sp,
-                fontWeight = FontWeight.Black
-            )
-
-            Text(
-                text = "9417  8800  4210  ${state.session.userId.takeLast(4).padStart(4, '7')}",
-                color = Color.White.copy(alpha = 0.9f),
-                fontSize = 15.sp,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = (state.currentUser?.effectiveName ?: state.session.displayName).ifBlank { "NEONGRAM USER" }.uppercase(),
-                    color = Color.White.copy(alpha = 0.8f),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    text = "12/29",
-                    color = Color.White.copy(alpha = 0.8f),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-        }
-
-        // Transfer Form
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
-                .background(scheme.surface)
-                .border(1.dp, scheme.border, RoundedCornerShape(18.dp))
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Text(
-                text = tr(lang, "Перевод по @username или номеру карты", "@username же карта номерине которуу", "Transfer by @username or card number"),
-                color = scheme.text,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold
-            )
-            NeonInput(
-                value = recipientInput,
-                onValueChange = { recipientInput = it },
-                placeholder = tr(lang, "@username или 16 цифр карты", "@username же карта номери", "@username or 16-digit card")
-            )
-            NeonInput(
-                value = amountInput,
-                onValueChange = { amountInput = it },
-                placeholder = tr(lang, "Сумма (KGS)", "Сумма (KGS)", "Amount (KGS)")
-            )
-            PrimaryButton(
-                label = tr(lang, "Перевести", "Которуу", "Send Transfer"),
-                onClick = {
-                    val amount = amountInput.trim().toDoubleOrNull()
-                    if (recipientInput.isBlank() || amount == null || amount <= 0.0) {
-                        viewModel.showToast(tr(lang, "Проверьте получателя и сумму", "Алуучуну жана сумманы текшериңиз", "Check recipient and amount"))
-                    } else if (amount > balanceKgs) {
-                        viewModel.showToast(tr(lang, "Недостаточно средств", "Каражат жетишсиз", "Insufficient balance"))
-                    } else {
-                        balanceKgs -= amount
-                        transactions.add(
-                            0,
-                            BankTransactionEntry(
-                                id = "tx_${System.currentTimeMillis()}",
-                                recipient = recipientInput.trim(),
-                                amountKgs = amount,
-                                timestamp = tr(lang, "Только что", "Жаңы эле", "Just now"),
-                                isIncoming = false
-                            )
-                        )
-                        recipientInput = ""
-                        amountInput = ""
-                        viewModel.showToast(tr(lang, "Перевод выполнен", "Которуу аткарылды", "Transfer completed"))
-                    }
-                }
-            )
-        }
-
-        // Transaction History
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
-                .background(scheme.surface)
-                .border(1.dp, scheme.border, RoundedCornerShape(18.dp))
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Text(
-                text = tr(lang, "История операций", "Операциялар тарыхы", "Transaction History"),
-                color = scheme.text,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold
-            )
-            transactions.forEach { tx ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(scheme.surfaceAlt)
-                        .padding(12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(
-                            text = tx.recipient,
-                            color = scheme.text,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = tx.timestamp,
-                            color = scheme.muted,
-                            fontSize = 12.sp
-                        )
-                    }
-                    Text(
-                        text = String.format(
-                            Locale.US,
-                            "%s%,.0f KGS",
-                            if (tx.isIncoming) "+" else "-",
-                            tx.amountKgs
-                        ),
-                        color = if (tx.isIncoming) Color(0xFF31C06A) else scheme.text,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-        }
-    }
-}
-
-// ============================================================================
-// 7. BROWSER SERVICE SCREEN (`BrowserScreen.jsx`)
-// ============================================================================
-
-private data class SearchEngineItem(
-    val id: String,
-    val name: String,
-    val searchPrefix: String
-)
-
-@SuppressLint("SetJavaScriptEnabled")
-@Composable
-fun BrowserServiceScreen(
-    state: NeongramUiState,
-    viewModel: NeongramViewModel
-) {
-    val scheme = LocalNeonScheme.current
-    val lang = state.session.language
-
-    val engines = remember {
-        listOf(
-            SearchEngineItem("google", "Google", "https://www.google.com/search?q="),
-            SearchEngineItem("ddg", "DuckDuckGo", "https://duckduckgo.com/?q="),
-            SearchEngineItem("bing", "Bing", "https://www.bing.com/search?q="),
-            SearchEngineItem("yandex", "Yandex", "https://yandex.ru/search/?text="),
-            SearchEngineItem("brave", "Brave", "https://search.brave.com/search?q=")
-        )
-    }
-
-    var selectedEngine by remember { mutableStateOf(engines.first()) }
-    var addressInput by remember { mutableStateOf("neongram://home") }
-    var currentUrl by remember { mutableStateOf<String?>(null) }
-    var tabCount by remember { mutableIntStateOf(1) }
-    var webViewRef by remember { mutableStateOf<WebView?>(null) }
-
-    fun openQueryOrUrl(raw: String) {
-        val trimmed = raw.trim()
-        if (trimmed.isBlank() || trimmed == "neongram://home") {
-            currentUrl = null
-            addressInput = "neongram://home"
-            return
-        }
-        val target = when {
-            trimmed.startsWith("http://") || trimmed.startsWith("https://") -> trimmed
-            trimmed.contains(".") && !trimmed.contains(" ") -> "https://$trimmed"
-            else -> selectedEngine.searchPrefix + android.net.Uri.encode(trimmed)
-        }
-        addressInput = target
-        currentUrl = target
-    }
-
-    PageScaffold(
-        title = tr(lang, "Браузер", "Браузер", "Browser"),
-        onBack = { viewModel.navigateBack() },
-        scroll = false
-    ) {
-        // Top Address Bar Pill (`neongram://home`)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 46.dp)
-                .clip(RoundedCornerShape(999.dp))
-                .background(scheme.surface)
-                .border(1.dp, scheme.border, RoundedCornerShape(999.dp))
-                .padding(horizontal = 14.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.Language,
-                contentDescription = null,
-                tint = scheme.primary,
-                modifier = Modifier.size(18.dp)
-            )
-            Box(
-                modifier = Modifier.weight(1f),
-                contentAlignment = Alignment.CenterStart
-            ) {
-                BasicTextField(
-                    value = addressInput,
-                    onValueChange = { addressInput = it },
-                    singleLine = true,
-                    textStyle = TextStyle(color = scheme.text, fontSize = 14.sp),
-                    cursorBrush = SolidColor(scheme.primary),
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(scheme.primary)
-                    .clickable { openQueryOrUrl(addressInput) }
-                    .padding(horizontal = 12.dp, vertical = 5.dp)
-            ) {
-                Text(
-                    text = "GO",
-                    color = Color(0xFF06070C),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.ExtraBold
-                )
-            }
-        }
-
-        // Main Browser Content Area (NWEB Hero Home or Android WebView)
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-        ) {
-            if (currentUrl == null) {
-                Column(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    // NWEB Hero Card
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(22.dp))
-                            .background(
-                                Brush.linearGradient(
-                                    colors = listOf(
-                                        Color(0xFF5DA9FF).copy(alpha = 0.25f),
-                                        scheme.accent.copy(alpha = 0.22f),
-                                        scheme.surface
-                                    )
-                                )
-                            )
-                            .border(1.dp, Color(0xFF5DA9FF).copy(alpha = 0.5f), RoundedCornerShape(22.dp))
-                            .padding(18.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Text(
-                            text = "NWEB • CYBER BROWSER",
-                            color = Color(0xFF5DA9FF),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            letterSpacing = 1.sp
-                        )
-                        Text(
-                            text = tr(
-                                lang,
-                                "Приватный поиск внутри Neongram",
-                                "Neongram ичиндеги купуя издөө",
-                                "Private Web & Search inside Neongram"
-                            ),
-                            color = scheme.text,
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.ExtraBold
-                        )
-
-                        // Search Engine Switcher
-                        Row(
+                        Box(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(chip.accentColor.copy(alpha = 0.16f))
+                                .border(1.dp, chip.accentColor.copy(alpha = 0.45f), CircleShape),
+                            contentAlignment = Alignment.Center
                         ) {
-                            engines.forEach { engine ->
-                                val active = selectedEngine.id == engine.id
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(if (active) scheme.primary else scheme.surfaceAlt)
-                                        .border(1.dp, if (active) scheme.primary else scheme.border, RoundedCornerShape(10.dp))
-                                        .clickable { selectedEngine = engine }
-                                        .padding(horizontal = 12.dp, vertical = 7.dp)
-                                ) {
-                                    Text(
-                                        text = engine.name,
-                                        color = if (active) Color(0xFF06070C) else scheme.text,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = null,
+                                tint = chip.accentColor,
+                                modifier = Modifier.size(16.dp)
+                            )
                         }
                     }
-
-                    // Quick Links (YouTube, GitHub)
-                    Text(
-                        text = tr(lang, "Быстрые ссылки", "Тез шилтемелер", "Quick Links"),
-                        color = scheme.text,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        QuickLinkCard(
-                            title = "YouTube",
-                            subtitle = "youtube.com",
-                            accentColor = Color(0xFFFF4D6D),
-                            modifier = Modifier.weight(1f),
-                            onClick = { openQueryOrUrl("https://m.youtube.com") }
-                        )
-                        QuickLinkCard(
-                            title = "GitHub",
-                            subtitle = "github.com",
-                            accentColor = Color(0xFF5DA9FF),
-                            modifier = Modifier.weight(1f),
-                            onClick = { openQueryOrUrl("https://github.com") }
-                        )
-                    }
-                }
-            } else {
-                val urlToLoad = currentUrl!!
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(RoundedCornerShape(18.dp))
-                        .border(1.dp, scheme.border, RoundedCornerShape(18.dp))
-                ) {
-                    AndroidView(
-                        factory = { ctx ->
-                            WebView(ctx).apply {
-                                layoutParams = ViewGroup.LayoutParams(
-                                    ViewGroup.LayoutParams.MATCH_PARENT,
-                                    ViewGroup.LayoutParams.MATCH_PARENT
-                                )
-                                settings.javaScriptEnabled = true
-                                settings.domStorageEnabled = true
-                                webViewClient = object : WebViewClient() {
-                                    override fun onPageFinished(view: WebView?, url: String?) {
-                                        if (!url.isNullOrBlank()) {
-                                            addressInput = url
-                                        }
-                                    }
-                                }
-                                loadUrl(urlToLoad)
-                                webViewRef = this
-                            }
-                        },
-                        update = { view ->
-                            if (view.url != urlToLoad) {
-                                view.loadUrl(urlToLoad)
-                            }
-                        },
-                        modifier = Modifier.fillMaxSize()
-                    )
                 }
             }
         }
-
-        // 6-Button Bottom Navigation Bar (Back, Forward, Refresh, Tabs, New Tab, Menu)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .background(scheme.surface)
-                .border(1.dp, scheme.border, RoundedCornerShape(16.dp))
-                .padding(vertical = 8.dp, horizontal = 10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            BrowserNavButton(
-                icon = Icons.AutoMirrored.Filled.ArrowBack,
-                onClick = {
-                    val wv = webViewRef
-                    if (wv != null && wv.canGoBack()) {
-                        wv.goBack()
-                    } else {
-                        currentUrl = null
-                        addressInput = "neongram://home"
-                    }
-                }
-            )
-            BrowserNavButton(
-                icon = Icons.AutoMirrored.Filled.ArrowForward,
-                onClick = {
-                    val wv = webViewRef
-                    if (wv != null && wv.canGoForward()) {
-                        wv.goForward()
-                    }
-                }
-            )
-            BrowserNavButton(
-                icon = Icons.Default.Refresh,
-                onClick = { webViewRef?.reload() }
-            )
-            // Tabs button with count badge
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(scheme.surfaceAlt)
-                    .clickable {
-                        currentUrl = null
-                        addressInput = "neongram://home"
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.FilterNone,
-                    contentDescription = "Tabs",
-                    tint = scheme.text,
-                    modifier = Modifier.size(18.dp)
-                )
-                Text(
-                    text = tabCount.toString(),
-                    color = scheme.primary,
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.ExtraBold
-                )
-            }
-            BrowserNavButton(
-                icon = Icons.Default.Add,
-                onClick = {
-                    tabCount += 1
-                    currentUrl = null
-                    addressInput = "neongram://home"
-                }
-            )
-            BrowserNavButton(
-                icon = Icons.Default.MoreVert,
-                onClick = {
-                    currentUrl = null
-                    addressInput = "neongram://home"
-                }
-            )
-        }
-    }
-}
-
-@Composable
-private fun QuickLinkCard(
-    title: String,
-    subtitle: String,
-    accentColor: Color,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    val scheme = LocalNeonScheme.current
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(scheme.surface)
-            .border(1.dp, scheme.border, RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        Text(
-            text = title,
-            color = accentColor,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold
-        )
-        Text(
-            text = subtitle,
-            color = scheme.muted,
-            fontSize = 12.sp
-        )
-    }
-}
-
-@Composable
-private fun BrowserNavButton(
-    icon: ImageVector,
-    onClick: () -> Unit
-) {
-    val scheme = LocalNeonScheme.current
-    Box(
-        modifier = Modifier
-            .size(36.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(scheme.surfaceAlt)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = scheme.text,
-            modifier = Modifier.size(18.dp)
-        )
     }
 }

@@ -33,7 +33,6 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bolt
@@ -69,7 +68,6 @@ import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -103,8 +101,6 @@ import space.neongram.app.core.model.ChatMemberDto
 import space.neongram.app.core.model.MessageDto
 import space.neongram.app.core.model.UserDto
 import space.neongram.app.core.ui.AnimatedNeonBackground
-import space.neongram.app.core.ui.CyberBrandTitle
-import space.neongram.app.core.ui.ListRow
 import space.neongram.app.core.ui.LocalNeonScheme
 import space.neongram.app.core.ui.NeonAvatar
 import space.neongram.app.core.ui.NeonInput
@@ -114,6 +110,37 @@ import space.neongram.app.core.ui.tr
 import space.neongram.app.ui.ActiveOverlayScreen
 import space.neongram.app.ui.NeongramUiState
 import space.neongram.app.ui.NeongramViewModel
+
+// 2026 iOS 18 Liquid Glass & Aurora Violet Brushes & Palette
+private val LiquidGlassFillBrush = Brush.verticalGradient(
+    colors = listOf(
+        Color.White.copy(alpha = 0.12f),
+        Color.White.copy(alpha = 0.05f)
+    )
+)
+
+private val LiquidGlassSpecularBorderBrush = Brush.linearGradient(
+    colors = listOf(
+        Color.White.copy(alpha = 0.38f),
+        Color(0xFF00F0FF).copy(alpha = 0.22f),
+        Color(0xFFA855F7).copy(alpha = 0.12f)
+    )
+)
+
+private val NeonAvatarRingBrush = Brush.linearGradient(
+    colors = listOf(
+        Color(0xFF00F0FF),
+        Color(0xFFA855F7),
+        Color(0xFFEC4899)
+    )
+)
+
+private val OutgoingAuroraBubbleBrush = Brush.horizontalGradient(
+    colors = listOf(
+        Color(0xCC6D28D9),
+        Color(0xB30891B2)
+    )
+)
 
 private fun formatIsoTimeToHhMm(iso: String?): String {
     val raw = iso?.trim().orEmpty()
@@ -152,20 +179,17 @@ private fun formatLastMessagePreview(msg: MessageDto?, lang: String): String {
             val cap = msg.cleanContent
             if (cap.isNotBlank()) "🎬 $cap" else tr(lang, "Видео", "Видео", "Video")
         }
-        "VOICE", "AUDIO" -> tr(lang, "Голосовое", "Үн билдирүү", "Voice message")
+        "VOICE", "AUDIO" -> tr(lang, "Голосовое сообщение", "Үн билдирүү", "Voice message")
         "FILE", "DOCUMENT" -> msg.fileName?.takeIf { it.isNotBlank() } ?: tr(lang, "Файл", "Файл", "File")
         else -> msg.cleanContent.ifBlank { tr(lang, "Сообщение", "Билдирүү", "Message") }
     }
 }
 
 /**
- * 1:1 with `ChatsScreen.jsx` mobile layout:
- * - Header (`paddingHorizontal = 20.dp, paddingTop = 8.dp, paddingBottom = 12.dp`):
- *   `CyberBrandTitle("Neongram")` + search bar (`minHeight = 46.dp, borderRadius = 16.dp`).
- * - LazyColumn of chats filtering out support chats (`!chat.isSupport`).
- * - Search mode (`>= 2` chars): triggers `viewModel.searchUsers(query)`, shows `"ЧАТЫ"` & `"ПОЛЬЗОВАТЕЛИ"`.
- * - Normal mode: shows `"ЗАКРЕПЛЕННЫЕ"` section if `pinnedChats.isNotEmpty()`, then `pinnedChats`, then `normalChats`.
- * - Long-press / 3-dots opens Chat Context Action Sheet + Delete Confirm Dialog with `"Удалить у всех"` checkbox.
+ * 2026 iOS 18 Liquid Glass & Aurora Violet ChatsTabScreen (`template_3_ios_liquid_aurora`):
+ * - Top Frosted Capsule Search Bar (`RoundedCornerShape(24.dp)`, `height = 50.dp`, translucent glass fill `Color.White.copy(alpha = 0.09f)`, `1.dp` specular glass border, search icon + `"Search chats / Поиск чатов"`).
+ * - Large bold header row: `"Chats / Чаты"` (`34.sp`, ExtraBold, white) + right circular frosted glass compose/AI button (`42.dp` circle with `1.dp` specular border and glowing cyan icon).
+ * - Liquid Glass Chat Cards (`LazyColumn` with `12.dp` spacing, `paddingHorizontal = 16.dp`, `paddingBottom = 110.dp` for the floating bottom glass dock).
  */
 @Composable
 fun ChatsTabScreen(
@@ -224,63 +248,35 @@ fun ChatsTabScreen(
                 .fillMaxSize()
                 .statusBarsPadding()
         ) {
-            // Header (`paddingHorizontal = 20.dp, paddingTop = 8.dp, paddingBottom = 12.dp`)
+            // Top Header & Frosted Capsule Search Bar
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                    .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    CyberBrandTitle(text = "Neongram")
-
-                    // AI quick pill button
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(scheme.surface)
-                            .border(1.dp, scheme.border, RoundedCornerShape(12.dp))
-                            .clickable { viewModel.openAiAssistantChat() }
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.AutoAwesome,
-                            contentDescription = "Neongram AI",
-                            tint = scheme.primary,
-                            modifier = Modifier.size(15.dp)
-                        )
-                        Text(
-                            text = "AI",
-                            color = scheme.text,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.ExtraBold
-                        )
-                    }
-                }
-
-                // Search bar (`minHeight = 46.dp, borderRadius = 16.dp`, `surface` bg, `border`, search icon, `"Поиск"` placeholder, clear button)
+                // Top Frosted Capsule Search Bar (`RoundedCornerShape(24.dp)`, `height = 50.dp`)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 46.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(scheme.surface)
-                        .border(1.dp, scheme.border, RoundedCornerShape(16.dp))
-                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                        .height(50.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(scheme.surface.copy(alpha = 0.65f))
+                        .background(Color.White.copy(alpha = 0.09f))
+                        .border(
+                            width = 1.dp,
+                            brush = LiquidGlassSpecularBorderBrush,
+                            shape = RoundedCornerShape(24.dp)
+                        )
+                        .padding(horizontal = 16.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Search,
                         contentDescription = "Search",
-                        tint = scheme.muted,
-                        modifier = Modifier.size(18.dp)
+                        tint = Color(0xFFB4BEE0),
+                        modifier = Modifier.size(20.dp)
                     )
 
                     Box(
@@ -289,8 +285,8 @@ fun ChatsTabScreen(
                     ) {
                         if (searchQuery.isEmpty()) {
                             Text(
-                                text = tr(lang, "Поиск", "Издөө", "Search"),
-                                color = scheme.muted,
+                                text = tr(lang, "Поиск чатов", "Чаттарды издөө", "Search chats"),
+                                color = Color(0xFF9AA6D1),
                                 fontSize = (15f * scheme.fontScale).sp
                             )
                         }
@@ -302,10 +298,10 @@ fun ChatsTabScreen(
                             },
                             singleLine = true,
                             textStyle = TextStyle(
-                                color = scheme.text,
+                                color = Color(0xFFF8FAFF),
                                 fontSize = (15f * scheme.fontScale).sp
                             ),
-                            cursorBrush = SolidColor(scheme.primary),
+                            cursorBrush = SolidColor(Color(0xFF00F0FF)),
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
@@ -313,8 +309,9 @@ fun ChatsTabScreen(
                     if (searchQuery.isNotEmpty()) {
                         Box(
                             modifier = Modifier
-                                .size(24.dp)
+                                .size(26.dp)
                                 .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.12f))
                                 .clickable {
                                     searchQuery = ""
                                     viewModel.searchUsers("")
@@ -324,19 +321,60 @@ fun ChatsTabScreen(
                             Icon(
                                 imageVector = Icons.Default.Close,
                                 contentDescription = "Clear search",
-                                tint = scheme.muted,
-                                modifier = Modifier.size(16.dp)
+                                tint = Color(0xFFF8FAFF),
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Large bold header row: "Chats / Чаты" (34.sp, ExtraBold, white) + right circular frosted glass compose/AI button (42.dp)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = tr(lang, "Чаты", "Чаттар", "Chats"),
+                        color = Color(0xFFF8FAFF),
+                        fontSize = 34.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = (-0.5).sp
+                    )
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        // Circular Frosted Glass AI / Compose Button (42.dp circle with 1.dp specular border and glowing cyan icon)
+                        Box(
+                            modifier = Modifier
+                                .size(42.dp)
+                                .clip(CircleShape)
+                                .background(scheme.surface.copy(alpha = 0.65f))
+                                .background(LiquidGlassFillBrush)
+                                .border(1.dp, LiquidGlassSpecularBorderBrush, CircleShape)
+                                .clickable { viewModel.openAiAssistantChat() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AutoAwesome,
+                                contentDescription = "Neongram AI",
+                                tint = Color(0xFF00F0FF),
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                     }
                 }
             }
 
-            // Chats & Search Results List
+            // Liquid Glass Chat Cards (`LazyColumn` with `12.dp` spacing, `paddingHorizontal = 16.dp`, `paddingBottom = 110.dp`)
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 2.dp, bottom = 120.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 110.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 if (isSearchActive) {
                     item(key = "section_chats_header") {
@@ -356,7 +394,7 @@ fun ChatsTabScreen(
                             items = filteredLocalChats,
                             key = { "search_chat_${it.id}" }
                         ) { chat ->
-                            ChatRowItem(
+                            LiquidGlassChatCard(
                                 chat = chat,
                                 currentUserId = currentUserId,
                                 serverUrl = serverUrl,
@@ -385,12 +423,9 @@ fun ChatsTabScreen(
                             items = state.searchResults,
                             key = { "search_user_${it.id}" }
                         ) { user ->
-                            val resolvedAvatar = resolveFullMediaUrl(user.avatarUrl, serverUrl)
-                            ListRow(
-                                title = user.effectiveName,
-                                subtitle = "@${user.username}",
-                                avatarUrl = resolvedAvatar,
-                                avatarLabel = user.effectiveName,
+                            LiquidGlassUserSearchCard(
+                                user = user,
+                                serverUrl = serverUrl,
                                 onClick = { viewModel.startDirectChat(user) }
                             )
                         }
@@ -419,7 +454,7 @@ fun ChatsTabScreen(
                                 items = pinnedChats,
                                 key = { "pinned_chat_${it.id}" }
                             ) { chat ->
-                                ChatRowItem(
+                                LiquidGlassChatCard(
                                     chat = chat,
                                     currentUserId = currentUserId,
                                     serverUrl = serverUrl,
@@ -431,7 +466,7 @@ fun ChatsTabScreen(
 
                             if (normalChats.isNotEmpty()) {
                                 item(key = "pinned_divider_spacer") {
-                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Spacer(modifier = Modifier.height(2.dp))
                                 }
                             }
                         }
@@ -440,7 +475,7 @@ fun ChatsTabScreen(
                             items = normalChats,
                             key = { "normal_chat_${it.id}" }
                         ) { chat ->
-                            ChatRowItem(
+                            LiquidGlassChatCard(
                                 chat = chat,
                                 currentUserId = currentUserId,
                                 serverUrl = serverUrl,
@@ -455,7 +490,7 @@ fun ChatsTabScreen(
         }
     }
 
-    // Chat Context Action Sheet / Dialog
+    // Frosted Glass Bottom Sheet / Dialog for Chat Context Actions
     contextMenuChat?.let { targetChat ->
         val chatTitle = targetChat.resolveDisplayTitle(
             currentUserId = currentUserId,
@@ -468,32 +503,37 @@ fun ChatsTabScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.55f))
+                    .background(Color.Black.copy(alpha = 0.62f))
                     .clickable { contextMenuChat = null },
                 contentAlignment = Alignment.BottomCenter
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
-                        .background(scheme.surface)
-                        .border(1.dp, scheme.border, RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+                        .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
+                        .background(scheme.surface.copy(alpha = 0.92f))
+                        .background(LiquidGlassFillBrush)
+                        .border(
+                            width = 1.dp,
+                            brush = LiquidGlassSpecularBorderBrush,
+                            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+                        )
                         .clickable(enabled = false) {}
-                        .padding(20.dp),
+                        .padding(22.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Box(
                         modifier = Modifier
-                            .width(40.dp)
+                            .width(42.dp)
                             .height(4.dp)
                             .clip(RoundedCornerShape(2.dp))
-                            .background(scheme.muted.copy(alpha = 0.45f))
+                            .background(Color.White.copy(alpha = 0.35f))
                             .align(Alignment.CenterHorizontally)
                     )
 
                     Text(
                         text = chatTitle,
-                        color = scheme.text,
+                        color = Color(0xFFF8FAFF),
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
@@ -556,7 +596,7 @@ fun ChatsTabScreen(
         }
     }
 
-    // Delete Confirm Dialog with "Удалить у всех" checkbox
+    // Delete Confirm Frosted Glass Dialog with "Удалить у всех" checkbox
     deleteConfirmChat?.let { targetChat ->
         val chatTitle = targetChat.resolveDisplayTitle(
             currentUserId = currentUserId,
@@ -566,15 +606,16 @@ fun ChatsTabScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(scheme.surface)
-                    .border(1.dp, scheme.border, RoundedCornerShape(20.dp))
-                    .padding(20.dp),
+                    .clip(RoundedCornerShape(26.dp))
+                    .background(scheme.surface.copy(alpha = 0.94f))
+                    .background(LiquidGlassFillBrush)
+                    .border(1.dp, LiquidGlassSpecularBorderBrush, RoundedCornerShape(26.dp))
+                    .padding(22.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 Text(
                     text = tr(lang, "Удалить чат?", "Чатты өчүрөсүзбү?", "Delete chat?"),
-                    color = scheme.text,
+                    color = Color(0xFFF8FAFF),
                     fontSize = 19.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -586,7 +627,7 @@ fun ChatsTabScreen(
                         "«$chatTitle» чаты жана бардык билдирүүлөр өчүрүлөт.",
                         "Chat \"$chatTitle\" and its history will be deleted."
                     ),
-                    color = scheme.muted,
+                    color = Color(0xFFB4BEE0),
                     fontSize = 14.sp,
                     lineHeight = 20.sp
                 )
@@ -594,8 +635,9 @@ fun ChatsTabScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(scheme.surfaceAlt)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color.White.copy(alpha = 0.08f))
+                        .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(16.dp))
                         .clickable { deleteForEveryone = !deleteForEveryone }
                         .padding(horizontal = 10.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -604,15 +646,15 @@ fun ChatsTabScreen(
                         checked = deleteForEveryone,
                         onCheckedChange = { deleteForEveryone = it },
                         colors = CheckboxDefaults.colors(
-                            checkedColor = scheme.primary,
-                            uncheckedColor = scheme.muted,
+                            checkedColor = Color(0xFF00F0FF),
+                            uncheckedColor = Color(0xFF9AA6D1),
                             checkmarkColor = Color(0xFF06070C)
                         )
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = tr(lang, "Удалить у всех", "Баарынан өчүрүү", "Delete for everyone"),
-                        color = scheme.text,
+                        color = Color(0xFFF8FAFF),
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold
                     )
@@ -626,15 +668,15 @@ fun ChatsTabScreen(
                         modifier = Modifier
                             .weight(1f)
                             .heightIn(min = 46.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(scheme.surfaceAlt)
-                            .border(1.dp, scheme.border, RoundedCornerShape(14.dp))
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color.White.copy(alpha = 0.10f))
+                            .border(1.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(16.dp))
                             .clickable { deleteConfirmChat = null },
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = tr(lang, "Отмена", "Жокко чыгаруу", "Cancel"),
-                            color = scheme.text,
+                            color = Color(0xFFF8FAFF),
                             fontSize = 15.sp,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -644,7 +686,7 @@ fun ChatsTabScreen(
                         modifier = Modifier
                             .weight(1f)
                             .heightIn(min = 46.dp)
-                            .clip(RoundedCornerShape(14.dp))
+                            .clip(RoundedCornerShape(16.dp))
                             .background(scheme.danger)
                             .clickable {
                                 val id = targetChat.id
@@ -668,14 +710,13 @@ fun ChatsTabScreen(
 
 @Composable
 private fun SectionUppercaseHeader(title: String) {
-    val scheme = LocalNeonScheme.current
     Text(
         text = title.uppercase(),
-        color = scheme.muted,
+        color = Color(0xFF9AA6D1),
         fontSize = 12.sp,
         fontWeight = FontWeight.ExtraBold,
-        letterSpacing = 0.8.sp,
-        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+        letterSpacing = 1.0.sp,
+        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
     )
 }
 
@@ -685,15 +726,16 @@ private fun EmptyHintCard(text: String) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(scheme.surface)
-            .border(1.dp, scheme.border, RoundedCornerShape(16.dp))
-            .padding(20.dp),
+            .clip(RoundedCornerShape(26.dp))
+            .background(scheme.surface.copy(alpha = 0.65f))
+            .background(LiquidGlassFillBrush)
+            .border(1.dp, LiquidGlassSpecularBorderBrush, RoundedCornerShape(26.dp))
+            .padding(22.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = text,
-            color = scheme.muted,
+            color = Color(0xFFB4BEE0),
             fontSize = 14.sp,
             textAlign = TextAlign.Center,
             lineHeight = 20.sp
@@ -701,19 +743,78 @@ private fun EmptyHintCard(text: String) {
     }
 }
 
+@Composable
+private fun LiquidGlassUserSearchCard(
+    user: UserDto,
+    serverUrl: String,
+    onClick: () -> Unit
+) {
+    val scheme = LocalNeonScheme.current
+    val shape = RoundedCornerShape(26.dp)
+    val resolvedAvatar = resolveFullMediaUrl(user.avatarUrl, serverUrl)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(scheme.surface.copy(alpha = 0.72f))
+            .background(LiquidGlassFillBrush)
+            .border(1.dp, LiquidGlassSpecularBorderBrush, shape)
+            .clickable(onClick = onClick)
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(54.dp)
+                .clip(CircleShape)
+                .border(2.dp, NeonAvatarRingBrush, CircleShape)
+                .padding(2.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            NeonAvatar(
+                avatarUrl = resolvedAvatar,
+                label = user.effectiveName,
+                sizeDp = 50.dp,
+                cornerRadiusDp = 25.dp
+            )
+        }
+
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = user.effectiveName,
+                color = Color(0xFFF8FAFF),
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = "@${user.username}",
+                color = Color(0xFFB4BEE0),
+                fontSize = 14.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
 /**
- * 1:1 with `ChatRowItem` in `ChatsScreen.jsx`:
- * - Container: `borderRadius = 16.dp`, `paddingHorizontal = 11.dp, paddingVertical = 9.dp`,
- *   `surface` bg (or purple tint `Color(0x1AA855F7)` + border `Color(0x8CA855F7)` if `chat.isSecure`).
- * - Left: `NeonAvatar` (`50.dp`, cornerRadius `17.dp`, Saved/AI/System/Peer avatar).
- * - Middle/Right:
- *   Top line: lock icon if `isSecure` + Title (`17.sp`, Bold) + formatted timestamp (`HH:mm`, `11.sp`, muted).
- *   Bottom line: Last message preview (`13.sp`, PHOTO -> `"Фото"`, VIDEO -> `"Видео"`, VOICE -> `"Голосовое"`, FILE -> `"Файл"`, or text)
- *   + right indicators: pin icon if `chat.pinned`, mute icon if `chat.isMuted`, unread badge if applicable.
+ * Frosted Liquid Glass Chat Card (`template_3_ios_liquid_aurora`):
+ * - `RoundedCornerShape(26.dp)`, translucent gradient fill `Color.White.copy(alpha = 0.12f)` -> `Color.White.copy(alpha = 0.05f)` over `scheme.surface`,
+ *   `1.dp` specular gradient border `White@0.38 -> Cyan@0.22 -> Purple@0.12`, `padding = 14.dp`.
+ * - Left: Circular Avatar (`54.dp`) with glowing Cyan-to-Violet neon ring (`NeonAvatar` with `cornerRadiusDp = 27.dp`).
+ * - Center: Chat Title (`17.sp`, Bold, `#F8FAFF`) + Message Preview (`14.sp`, `#B4BEE0`, 1-2 lines, with sparkle/media icon).
+ * - Right: Timestamp (`12.sp`, `#9AA6D1`) + Glowing Cyan Circle Badge (`24.dp`, `Color(0xFF00F0FF)`, bold dark text) or glowing violet indicator dot / pin icon.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ChatRowItem(
+private fun LiquidGlassChatCard(
     chat: ChatDto,
     currentUserId: String,
     serverUrl: String,
@@ -722,10 +823,7 @@ private fun ChatRowItem(
     onOpenMenu: () -> Unit
 ) {
     val scheme = LocalNeonScheme.current
-    val shape = RoundedCornerShape(16.dp)
-
-    val containerBg = if (chat.isSecure) Color(0x1AA855F7) else scheme.surface
-    val containerBorder = if (chat.isSecure) Color(0x8CA855F7) else scheme.border
+    val shape = RoundedCornerShape(26.dp)
 
     val displayTitle = chat.resolveDisplayTitle(
         currentUserId = currentUserId,
@@ -760,151 +858,199 @@ private fun ChatRowItem(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(containerBg)
-            .border(1.dp, containerBorder, shape)
+            .background(
+                if (chat.isSecure) {
+                    Color(0x286D28D9)
+                } else {
+                    scheme.surface.copy(alpha = 0.72f)
+                }
+            )
+            .background(LiquidGlassFillBrush)
+            .border(
+                width = 1.dp,
+                brush = LiquidGlassSpecularBorderBrush,
+                shape = shape
+            )
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onOpenMenu
             )
-            .padding(horizontal = 11.dp, vertical = 9.dp),
+            .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Box {
-            NeonAvatar(
-                avatarUrl = avatarUrl,
-                label = displayTitle,
-                sizeDp = 50.dp,
-                cornerRadiusDp = 17.dp,
-                isSaved = chat.isSavedMessages,
-                isAi = chat.isAiChat,
-                isSystem = chat.isSystemChat
-            )
+        // Left: Circular Avatar (54.dp) with glowing Cyan-to-Violet neon ring
+        Box(contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier
+                    .size(54.dp)
+                    .clip(CircleShape)
+                    .border(2.dp, NeonAvatarRingBrush, CircleShape)
+                    .padding(2.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                NeonAvatar(
+                    avatarUrl = avatarUrl,
+                    label = displayTitle,
+                    sizeDp = 50.dp,
+                    cornerRadiusDp = 27.dp,
+                    isSaved = chat.isSavedMessages,
+                    isAi = chat.isAiChat,
+                    isSystem = chat.isSystemChat
+                )
+            }
+
             if (peerOnline) {
                 Box(
                     modifier = Modifier
-                        .size(13.dp)
+                        .size(14.dp)
                         .align(Alignment.BottomEnd)
                         .clip(CircleShape)
-                        .background(Color(0xFF10B981))
-                        .border(2.dp, scheme.surface, CircleShape)
+                        .background(Color(0xFF00F0FF))
+                        .border(2.dp, Color(0xFF0F1222), CircleShape)
                 )
             }
         }
 
+        // Center: Chat Title (17.sp, Bold, #F8FAFF) + Message Preview (14.sp, #B4BEE0, 1-2 lines, with sparkle/media icon)
         Column(
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            verticalArrangement = Arrangement.spacedBy(5.dp)
         ) {
-            // Top line: lock icon if isSecure + Title (17.sp, Bold) + formatted timestamp (HH:mm, 11.sp, muted)
             Row(
-                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Row(
-                    modifier = Modifier.weight(1f),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    if (chat.isSecure) {
-                        Icon(
-                            imageVector = Icons.Default.Lock,
-                            contentDescription = "Secure Chat",
-                            tint = Color(0xFFC084FC),
-                            modifier = Modifier.size(14.dp)
-                        )
-                    }
-                    Text(
-                        text = displayTitle,
-                        color = scheme.text,
-                        fontSize = (17f * scheme.fontScale).sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                if (chat.isSecure) {
+                    Icon(
+                        imageVector = Icons.Default.Lock,
+                        contentDescription = "Secure Chat",
+                        tint = Color(0xFFC084FC),
+                        modifier = Modifier.size(15.dp)
                     )
                 }
+                Text(
+                    text = displayTitle,
+                    color = Color(0xFFF8FAFF),
+                    fontSize = (17f * scheme.fontScale).sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                if (chat.isAiChat) {
+                    Icon(
+                        imageVector = Icons.Default.AutoAwesome,
+                        contentDescription = "AI",
+                        tint = Color(0xFF00F0FF),
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+                Text(
+                    text = previewText,
+                    color = Color(0xFFB4BEE0),
+                    fontSize = (14f * scheme.fontScale).sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    lineHeight = 18.sp
+                )
+            }
+        }
+
+        // Right: Timestamp (12.sp, #9AA6D1) + Glowing Cyan Circle Badge (24.dp, Color(0xFF00F0FF), bold dark text) or glowing violet indicator dot / pin icon
+        Column(
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                if (timestampText.isNotBlank()) {
+                    Text(
+                        text = timestampText,
+                        color = Color(0xFF9AA6D1),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .size(20.dp)
+                        .clip(CircleShape)
+                        .clickable(onClick = onOpenMenu),
+                    contentAlignment = Alignment.Center
                 ) {
-                    if (timestampText.isNotBlank()) {
-                        Text(
-                            text = timestampText,
-                            color = scheme.muted,
-                            fontSize = 11.sp
-                        )
-                    }
-                    Box(
-                        modifier = Modifier
-                            .size(22.dp)
-                            .clip(CircleShape)
-                            .clickable(onClick = onOpenMenu),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.MoreVert,
-                            contentDescription = "Chat options",
-                            tint = scheme.muted,
-                            modifier = Modifier.size(15.dp)
-                        )
-                    }
+                    Icon(
+                        imageVector = Icons.Default.MoreVert,
+                        contentDescription = "Chat options",
+                        tint = Color(0xFF9AA6D1),
+                        modifier = Modifier.size(14.dp)
+                    )
                 }
             }
 
-            // Bottom line: Last message preview (13.sp) + right indicators (pin, mute, unread badge)
             Row(
-                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Text(
-                    text = previewText,
-                    color = scheme.muted,
-                    fontSize = (13f * scheme.fontScale).sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
-                )
+                if (chat.isMuted) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.VolumeOff,
+                        contentDescription = "Muted",
+                        tint = Color(0xFF9AA6D1),
+                        modifier = Modifier.size(15.dp)
+                    )
+                }
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    if (chat.pinned) {
-                        Icon(
-                            imageVector = Icons.Default.PushPin,
-                            contentDescription = "Pinned",
-                            tint = scheme.primary,
-                            modifier = Modifier.size(14.dp)
-                        )
-                    }
-                    if (chat.isMuted) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.VolumeOff,
-                            contentDescription = "Muted",
-                            tint = scheme.muted,
-                            modifier = Modifier.size(14.dp)
-                        )
-                    }
-                    if (hasUnread) {
+                when {
+                    hasUnread -> {
                         Box(
                             modifier = Modifier
-                                .height(18.dp)
-                                .widthIn(min = 18.dp)
+                                .size(24.dp)
                                 .clip(CircleShape)
-                                .background(scheme.primary)
-                                .padding(horizontal = 5.dp),
+                                .background(Color(0xFF00F0FF))
+                                .border(1.dp, Color.White.copy(alpha = 0.5f), CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = "1",
-                                color = if (scheme.isDark) Color(0xFF06070C) else Color.White,
-                                fontSize = 10.sp,
+                                color = Color(0xFF06070C),
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.ExtraBold
                             )
                         }
+                    }
+                    chat.pinned -> {
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFA855F7).copy(alpha = 0.22f))
+                                .border(1.dp, Color(0xFFA855F7).copy(alpha = 0.55f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PushPin,
+                                contentDescription = "Pinned",
+                                tint = Color(0xFFD8B4FE),
+                                modifier = Modifier.size(13.dp)
+                            )
+                        }
+                    }
+                    chat.isAiChat || peerOnline -> {
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFA855F7))
+                                .border(1.5.dp, Color.White.copy(alpha = 0.55f), CircleShape)
+                        )
                     }
                 }
             }
@@ -920,21 +1066,22 @@ private fun ContextActionRow(
     onClick: () -> Unit
 ) {
     val scheme = LocalNeonScheme.current
-    val fg = if (danger) scheme.danger else scheme.text
+    val fg = if (danger) scheme.danger else Color(0xFFF8FAFF)
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(scheme.surfaceAlt)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color.White.copy(alpha = 0.08f))
+            .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(18.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Icon(
             imageVector = icon,
             contentDescription = label,
-            tint = fg,
+            tint = if (danger) scheme.danger else Color(0xFF00F0FF),
             modifier = Modifier.size(20.dp)
         )
         Text(
@@ -947,7 +1094,13 @@ private fun ContextActionRow(
 }
 
 /**
- * 1:1 with `ChatConversation.jsx`, `ChatHeader.jsx`, `MessageBubble.jsx`, `Composer.jsx`, and `AttachSheet.jsx`.
+ * 2026 iOS 18 Liquid Glass & Aurora Violet ChatRoomScreen (`template_3_ios_liquid_aurora`):
+ * - Floating Frosted Glass Header (`RoundedCornerShape(bottomStart = 26.dp, bottomEnd = 26.dp)`, translucent glass fill + bottom specular border):
+ *   Circular glass back button (`38.dp`), `NeonAvatar` (`42.dp` circle with glowing ring), Title + online/AI subtitle, and circular glass Call / Video / Menu buttons.
+ * - Liquid Glass Message Bubbles:
+ *   Outgoing (`isMe`): `RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp, bottomStart = 22.dp, bottomEnd = 6.dp)`, filled with translucent Aurora Violet-Cyan gradient and `1.dp` specular border (`Color.White.copy(alpha = 0.35f)`).
+ *   Incoming (`!isMe`): `RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp, bottomStart = 6.dp, bottomEnd = 22.dp)`, filled with frosted glass (`Color.White.copy(alpha = 0.11f)`) and `1.dp` glass border (`Color.White.copy(alpha = 0.22f)`).
+ * - Floating Liquid Glass Capsule Composer at bottom (`padding = 12.dp`, `RoundedCornerShape(28.dp)`, translucent glass fill + `1.dp` specular border, emoji toggle, attach sheet, and glowing cyan/violet circular send button).
  */
 @Composable
 fun ChatRoomScreen(
@@ -1003,6 +1156,8 @@ fun ChatRoomScreen(
         }
     }
 
+    val headerShape = RoundedCornerShape(bottomStart = 26.dp, bottomEnd = 26.dp)
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -1015,38 +1170,45 @@ fun ChatRoomScreen(
                 .fillMaxSize()
                 .statusBarsPadding()
         ) {
-            // 1. ChatHeader (`minHeight = 56.dp`, `surface` bg)
+            // 1. Floating Frosted Glass Header (`RoundedCornerShape(bottomStart = 26.dp, bottomEnd = 26.dp)`)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 56.dp)
-                    .background(scheme.surface)
-                    .border(width = 1.dp, color = scheme.border)
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .clip(headerShape)
+                    .background(scheme.surface.copy(alpha = 0.76f))
+                    .background(LiquidGlassFillBrush)
+                    .border(
+                        width = 1.dp,
+                        brush = LiquidGlassSpecularBorderBrush,
+                        shape = headerShape
+                    )
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Back button (`36.dp`, `chevron-back`) -> `viewModel.navigateBack()`
+                // Circular glass back button (38.dp)
                 Box(
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(38.dp)
                         .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.10f))
+                        .border(1.dp, Color.White.copy(alpha = 0.26f), CircleShape)
                         .clickable { viewModel.navigateBack() },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
                         contentDescription = "Back",
-                        tint = scheme.text,
-                        modifier = Modifier.size(24.dp)
+                        tint = Color(0xFFF8FAFF),
+                        modifier = Modifier.size(22.dp)
                     )
                 }
 
-                // Tappable Profile area: NeonAvatar (40.dp, cornerRadius 15.dp) + Title (17.sp, Bold) + Subtitle
+                // Tappable Profile area: NeonAvatar (42.dp circle with glowing ring) + Title + online/AI subtitle
                 Row(
                     modifier = Modifier
                         .weight(1f)
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(16.dp))
                         .clickable {
                             when {
                                 chat.type == "GROUP" -> viewModel.navigateToOverlay(ActiveOverlayScreen.GROUP_INFO)
@@ -1059,15 +1221,24 @@ fun ChatRoomScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    NeonAvatar(
-                        avatarUrl = avatarUrl,
-                        label = displayTitle,
-                        sizeDp = 40.dp,
-                        cornerRadiusDp = 15.dp,
-                        isSaved = chat.isSavedMessages,
-                        isAi = chat.isAiChat,
-                        isSystem = chat.isSystemChat
-                    )
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .border(1.8.dp, NeonAvatarRingBrush, CircleShape)
+                            .padding(2.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        NeonAvatar(
+                            avatarUrl = avatarUrl,
+                            label = displayTitle,
+                            sizeDp = 38.dp,
+                            cornerRadiusDp = 19.dp,
+                            isSaved = chat.isSavedMessages,
+                            isAi = chat.isAiChat,
+                            isSystem = chat.isSystemChat
+                        )
+                    }
 
                     Column(
                         modifier = Modifier.weight(1f),
@@ -1079,7 +1250,7 @@ fun ChatRoomScreen(
                         ) {
                             Text(
                                 text = displayTitle,
-                                color = scheme.text,
+                                color = Color(0xFFF8FAFF),
                                 fontSize = (17f * scheme.fontScale).sp,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
@@ -1088,14 +1259,14 @@ fun ChatRoomScreen(
                             if (chat.isAiChat) {
                                 Box(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(scheme.primary.copy(alpha = 0.16f))
-                                        .border(1.dp, scheme.primary.copy(alpha = 0.45f), RoundedCornerShape(6.dp))
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color(0xFF00F0FF).copy(alpha = 0.16f))
+                                        .border(1.dp, Color(0xFF00F0FF).copy(alpha = 0.45f), RoundedCornerShape(8.dp))
                                         .padding(horizontal = 6.dp, vertical = 1.dp)
                                 ) {
                                     Text(
                                         text = aiMode,
-                                        color = scheme.primary,
+                                        color = Color(0xFF00F0FF),
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.ExtraBold
                                     )
@@ -1105,7 +1276,7 @@ fun ChatRoomScreen(
 
                         Text(
                             text = subtitleText,
-                            color = if (peerUser?.isOnline == true) scheme.primary else scheme.muted,
+                            color = if (peerUser?.isOnline == true || chat.isAiChat) Color(0xFF00F0FF) else Color(0xFF9AA6D1),
                             fontSize = 12.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -1113,12 +1284,14 @@ fun ChatRoomScreen(
                     }
                 }
 
-                // Right action icons: Audio Call, Video Call (for DIRECT chats), and 3-dots Menu
+                // Right circular glass Call / Video / Menu buttons
                 if (chat.type == "DIRECT" && !chat.isSavedMessages && !chat.isAiChat && !chat.isSystemChat) {
                     Box(
                         modifier = Modifier
-                            .size(34.dp)
+                            .size(36.dp)
                             .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.10f))
+                            .border(1.dp, Color.White.copy(alpha = 0.24f), CircleShape)
                             .clickable {
                                 viewModel.showToast(tr(lang, "Аудиозвонок...", "Аудио чалуу...", "Starting audio call..."))
                             },
@@ -1127,15 +1300,17 @@ fun ChatRoomScreen(
                         Icon(
                             imageVector = Icons.Default.Call,
                             contentDescription = "Audio Call",
-                            tint = scheme.text,
-                            modifier = Modifier.size(19.dp)
+                            tint = Color(0xFFF8FAFF),
+                            modifier = Modifier.size(18.dp)
                         )
                     }
 
                     Box(
                         modifier = Modifier
-                            .size(34.dp)
+                            .size(36.dp)
                             .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.10f))
+                            .border(1.dp, Color.White.copy(alpha = 0.24f), CircleShape)
                             .clickable {
                                 viewModel.showToast(tr(lang, "Видеозвонок...", "Видео чалуу...", "Starting video call..."))
                             },
@@ -1144,15 +1319,17 @@ fun ChatRoomScreen(
                         Icon(
                             imageVector = Icons.Default.Videocam,
                             contentDescription = "Video Call",
-                            tint = scheme.text,
-                            modifier = Modifier.size(20.dp)
+                            tint = Color(0xFFF8FAFF),
+                            modifier = Modifier.size(19.dp)
                         )
                     }
                 } else if (chat.type == "GROUP") {
                     Box(
                         modifier = Modifier
-                            .size(34.dp)
+                            .size(36.dp)
                             .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.10f))
+                            .border(1.dp, Color.White.copy(alpha = 0.24f), CircleShape)
                             .clickable {
                                 viewModel.showToast(tr(lang, "Групповой звонок...", "Тайпалык чалуу...", "Group audio call..."))
                             },
@@ -1161,26 +1338,28 @@ fun ChatRoomScreen(
                         Icon(
                             imageVector = Icons.Default.Call,
                             contentDescription = "Group Call",
-                            tint = scheme.text,
-                            modifier = Modifier.size(19.dp)
+                            tint = Color(0xFFF8FAFF),
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
 
-                // 3-dots Menu button (`MoreHoriz`) opening an AnchoredMenu / DropdownMenu
+                // Circular glass Menu button
                 Box {
                     Box(
                         modifier = Modifier
-                            .size(34.dp)
+                            .size(36.dp)
                             .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.10f))
+                            .border(1.dp, Color.White.copy(alpha = 0.24f), CircleShape)
                             .clickable { showHeaderMenu = true },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.MoreHoriz,
                             contentDescription = "More options",
-                            tint = scheme.text,
-                            modifier = Modifier.size(21.dp)
+                            tint = Color(0xFFF8FAFF),
+                            modifier = Modifier.size(20.dp)
                         )
                     }
 
@@ -1188,8 +1367,8 @@ fun ChatRoomScreen(
                         expanded = showHeaderMenu,
                         onDismissRequest = { showHeaderMenu = false },
                         modifier = Modifier
-                            .background(scheme.surface)
-                            .border(1.dp, scheme.border, RoundedCornerShape(12.dp))
+                            .background(scheme.surface.copy(alpha = 0.95f))
+                            .border(1.dp, LiquidGlassSpecularBorderBrush, RoundedCornerShape(14.dp))
                     ) {
                         when {
                             chat.type == "GROUP" -> {
@@ -1197,7 +1376,7 @@ fun ChatRoomScreen(
                                     text = {
                                         Text(
                                             text = tr(lang, "Управление группой", "Тайпаны башкаруу", "Manage group"),
-                                            color = scheme.text
+                                            color = Color(0xFFF8FAFF)
                                         )
                                     },
                                     onClick = {
@@ -1209,7 +1388,7 @@ fun ChatRoomScreen(
                                     text = {
                                         Text(
                                             text = tr(lang, "Очистить историю группы", "Тайпа тарыхын тазалоо", "Clear group history"),
-                                            color = scheme.text
+                                            color = Color(0xFFF8FAFF)
                                         )
                                     },
                                     onClick = {
@@ -1235,7 +1414,7 @@ fun ChatRoomScreen(
                                     text = {
                                         Text(
                                             text = tr(lang, "Очистить историю", "Тарыхты тазалоо", "Clear history"),
-                                            color = scheme.text
+                                            color = Color(0xFFF8FAFF)
                                         )
                                     },
                                     onClick = {
@@ -1249,7 +1428,7 @@ fun ChatRoomScreen(
                                     text = {
                                         Text(
                                             text = tr(lang, "Профиль контакта", "Байланыш профили", "Contact profile"),
-                                            color = scheme.text
+                                            color = Color(0xFFF8FAFF)
                                         )
                                     },
                                     onClick = {
@@ -1261,7 +1440,7 @@ fun ChatRoomScreen(
                                     text = {
                                         Text(
                                             text = tr(lang, "Очистить историю", "Тарыхты тазалоо", "Clear history"),
-                                            color = scheme.text
+                                            color = Color(0xFFF8FAFF)
                                         )
                                     },
                                     onClick = {
@@ -1287,16 +1466,17 @@ fun ChatRoomScreen(
                 }
             }
 
-            // 2. Pinned Messages Bar (shown below header when `state.pinnedMessages.isNotEmpty()`)
+            // 2. Pinned Messages Bar (Frosted Glass Pill below header when `state.pinnedMessages.isNotEmpty()`)
             if (state.pinnedMessages.isNotEmpty()) {
                 val topPinned = state.pinnedMessages.last()
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(scheme.surface)
-                        .border(1.dp, scheme.border, RoundedCornerShape(12.dp))
+                        .padding(horizontal = 14.dp, vertical = 6.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(scheme.surface.copy(alpha = 0.7f))
+                        .background(LiquidGlassFillBrush)
+                        .border(1.dp, LiquidGlassSpecularBorderBrush, RoundedCornerShape(18.dp))
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -1306,7 +1486,7 @@ fun ChatRoomScreen(
                             .width(3.dp)
                             .height(28.dp)
                             .clip(RoundedCornerShape(2.dp))
-                            .background(scheme.primary)
+                            .background(Color(0xFF00F0FF))
                     )
                     Column(
                         modifier = Modifier.weight(1f),
@@ -1314,13 +1494,13 @@ fun ChatRoomScreen(
                     ) {
                         Text(
                             text = tr(lang, "Закрепленное сообщение", "Кадалган билдирүү", "Pinned message"),
-                            color = scheme.primary,
+                            color = Color(0xFF00F0FF),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.ExtraBold
                         )
                         Text(
                             text = formatLastMessagePreview(topPinned, lang),
-                            color = scheme.text,
+                            color = Color(0xFFF8FAFF),
                             fontSize = 13.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -1330,14 +1510,15 @@ fun ChatRoomScreen(
                         modifier = Modifier
                             .size(26.dp)
                             .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.1f))
                             .clickable { viewModel.togglePinMessage(topPinned.id) },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.Close,
                             contentDescription = "Unpin message",
-                            tint = scheme.muted,
-                            modifier = Modifier.size(16.dp)
+                            tint = Color(0xFFB4BEE0),
+                            modifier = Modifier.size(15.dp)
                         )
                     }
                 }
@@ -1355,7 +1536,7 @@ fun ChatRoomScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         CircularProgressIndicator(
-                            color = scheme.primary,
+                            color = Color(0xFF00F0FF),
                             modifier = Modifier.size(28.dp),
                             strokeWidth = 2.5.dp
                         )
@@ -1374,7 +1555,7 @@ fun ChatRoomScreen(
                                 "Азырынча билдирүүлөр жок. Биринчи болуп жазыңыз!",
                                 "No messages yet. Say hello!"
                             ),
-                            color = scheme.muted,
+                            color = Color(0xFFB4BEE0),
                             fontSize = 14.sp,
                             textAlign = TextAlign.Center
                         )
@@ -1383,8 +1564,8 @@ fun ChatRoomScreen(
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         items(
                             items = state.messages,
@@ -1405,15 +1586,15 @@ fun ChatRoomScreen(
                 }
             }
 
-            // 4. Composer Bar (hidden if `chat.isSystemChat`)
+            // 4. Floating Liquid Glass Capsule Composer at bottom (`padding = 12.dp`, `RoundedCornerShape(28.dp)`)
             if (!chat.isSystemChat) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // Reply / Edit Preview Bar above input pill
+                    // Reply / Edit Preview Bar above input capsule
                     val activeReply = state.replyToMessage
                     val activeEdit = state.editingMessage
                     if (activeReply != null || activeEdit != null) {
@@ -1422,10 +1603,11 @@ fun ChatRoomScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(scheme.surface)
-                                .border(1.dp, scheme.border, RoundedCornerShape(14.dp))
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(scheme.surface.copy(alpha = 0.78f))
+                                .background(LiquidGlassFillBrush)
+                                .border(1.dp, LiquidGlassSpecularBorderBrush, RoundedCornerShape(20.dp))
+                                .padding(horizontal = 14.dp, vertical = 9.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
@@ -1434,7 +1616,7 @@ fun ChatRoomScreen(
                                     .width(3.dp)
                                     .height(30.dp)
                                     .clip(RoundedCornerShape(2.dp))
-                                    .background(scheme.primary)
+                                    .background(Color(0xFF00F0FF))
                             )
                             Column(
                                 modifier = Modifier.weight(1f),
@@ -1448,7 +1630,7 @@ fun ChatRoomScreen(
                                             ?: tr(lang, "Сообщение", "Билдирүү", "Message")
                                         "${tr(lang, "Ответить", "Жооп берүү", "Reply")}: $author"
                                     },
-                                    color = scheme.primary,
+                                    color = Color(0xFF00F0FF),
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
                                     maxLines = 1,
@@ -1456,7 +1638,7 @@ fun ChatRoomScreen(
                                 )
                                 Text(
                                     text = formatLastMessagePreview(targetMsg, lang),
-                                    color = scheme.muted,
+                                    color = Color(0xFFB4BEE0),
                                     fontSize = 13.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -1466,6 +1648,7 @@ fun ChatRoomScreen(
                                 modifier = Modifier
                                     .size(26.dp)
                                     .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.1f))
                                     .clickable {
                                         if (isEditing) {
                                             viewModel.setEditTarget(null)
@@ -1479,8 +1662,8 @@ fun ChatRoomScreen(
                                 Icon(
                                     imageVector = Icons.Default.Close,
                                     contentDescription = "Cancel reply or edit",
-                                    tint = scheme.muted,
-                                    modifier = Modifier.size(16.dp)
+                                    tint = Color(0xFFB4BEE0),
+                                    modifier = Modifier.size(15.dp)
                                 )
                             }
                         }
@@ -1492,9 +1675,10 @@ fun ChatRoomScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(scheme.surface)
-                                .border(1.dp, scheme.border, RoundedCornerShape(16.dp))
+                                .clip(RoundedCornerShape(22.dp))
+                                .background(scheme.surface.copy(alpha = 0.78f))
+                                .background(LiquidGlassFillBrush)
+                                .border(1.dp, LiquidGlassSpecularBorderBrush, RoundedCornerShape(22.dp))
                                 .padding(horizontal = 10.dp, vertical = 8.dp),
                             horizontalArrangement = Arrangement.SpaceEvenly,
                             verticalAlignment = Alignment.CenterVertically
@@ -1502,50 +1686,58 @@ fun ChatRoomScreen(
                             quickEmojis.forEach { emoji ->
                                 Box(
                                     modifier = Modifier
-                                        .size(34.dp)
-                                        .clip(RoundedCornerShape(10.dp))
+                                        .size(36.dp)
+                                        .clip(CircleShape)
                                         .clickable { composerText += emoji },
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
                                         text = emoji,
-                                        fontSize = 19.sp
+                                        fontSize = 20.sp
                                     )
                                 }
                             }
                         }
                     }
 
-                    // Main Input Pill (`borderRadius = 26.dp`, `minHeight = 54.dp`, `surface` bg)
+                    // Floating Liquid Glass Capsule Composer (`RoundedCornerShape(28.dp)`)
+                    val capsuleShape = RoundedCornerShape(28.dp)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(min = 54.dp)
-                            .clip(RoundedCornerShape(26.dp))
-                            .background(scheme.surface)
-                            .border(1.dp, scheme.border, RoundedCornerShape(26.dp))
+                            .heightIn(min = 56.dp)
+                            .clip(capsuleShape)
+                            .background(scheme.surface.copy(alpha = 0.76f))
+                            .background(LiquidGlassFillBrush)
+                            .border(
+                                width = 1.dp,
+                                brush = LiquidGlassSpecularBorderBrush,
+                                shape = capsuleShape
+                            )
                             .padding(horizontal = 10.dp, vertical = 7.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        // Left Emoji button (`34.dp`, rounded `10.dp`)
+                        // Left Emoji button
                         Box(
                             modifier = Modifier
-                                .size(34.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(if (showEmojiBar) scheme.surfaceAlt else Color.Transparent)
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (showEmojiBar) Color.White.copy(alpha = 0.16f) else Color.Transparent
+                                )
                                 .clickable { showEmojiBar = !showEmojiBar },
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.SentimentSatisfiedAlt,
                                 contentDescription = "Emoji",
-                                tint = if (showEmojiBar) scheme.primary else scheme.muted,
-                                modifier = Modifier.size(21.dp)
+                                tint = if (showEmojiBar) Color(0xFF00F0FF) else Color(0xFFB4BEE0),
+                                modifier = Modifier.size(22.dp)
                             )
                         }
 
-                        // Multiline TextField (`placeholder = "Сообщение"`)
+                        // Multiline TextField
                         Box(
                             modifier = Modifier
                                 .weight(1f)
@@ -1554,8 +1746,8 @@ fun ChatRoomScreen(
                         ) {
                             if (composerText.isEmpty()) {
                                 Text(
-                                    text = tr(lang, "Сообщение", "Билдирүү", "Message"),
-                                    color = scheme.muted,
+                                    text = tr(lang, "Сообщение...", "Билдирүү...", "Message..."),
+                                    color = Color(0xFF9AA6D1),
                                     fontSize = (16f * scheme.fontScale).sp
                                 )
                             }
@@ -1565,38 +1757,47 @@ fun ChatRoomScreen(
                                 singleLine = false,
                                 maxLines = 5,
                                 textStyle = TextStyle(
-                                    color = scheme.text,
+                                    color = Color(0xFFF8FAFF),
                                     fontSize = (16f * scheme.fontScale).sp
                                 ),
-                                cursorBrush = SolidColor(scheme.primary),
+                                cursorBrush = SolidColor(Color(0xFF00F0FF)),
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
 
-                        // Right Attach button (`32.dp` circle, opens Attach Bottom Sheet Modal)
+                        // Right Attach button (`34.dp` frosted glass circle)
                         Box(
                             modifier = Modifier
-                                .size(32.dp)
+                                .size(34.dp)
                                 .clip(CircleShape)
-                                .background(scheme.surfaceAlt)
+                                .background(Color.White.copy(alpha = 0.10f))
+                                .border(1.dp, Color.White.copy(alpha = 0.22f), CircleShape)
                                 .clickable { showAttachSheet = true },
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = if (chat.isAiChat) Icons.Default.AutoAwesome else Icons.Default.AttachFile,
                                 contentDescription = "Attach",
-                                tint = if (chat.isAiChat) scheme.primary else scheme.muted,
+                                tint = if (chat.isAiChat) Color(0xFF00F0FF) else Color(0xFFB4BEE0),
                                 modifier = Modifier.size(18.dp)
                             )
                         }
 
-                        // Primary Send / Mic button (`36.dp` circle, `scheme.primary` bg, `Send` icon when text non-empty, `Mic` icon when empty)
+                        // Glowing Cyan/Violet Circular Send / Mic Button (`40.dp` circle)
                         val hasText = composerText.trim().isNotEmpty()
                         Box(
                             modifier = Modifier
-                                .size(36.dp)
+                                .size(40.dp)
                                 .clip(CircleShape)
-                                .background(scheme.primary)
+                                .background(
+                                    Brush.linearGradient(
+                                        colors = listOf(
+                                            Color(0xFF00F0FF),
+                                            Color(0xFF7C3AED)
+                                        )
+                                    )
+                                )
+                                .border(1.dp, Color.White.copy(alpha = 0.45f), CircleShape)
                                 .clickable {
                                     if (hasText) {
                                         val payload = composerText.trim()
@@ -1619,7 +1820,7 @@ fun ChatRoomScreen(
                             Icon(
                                 imageVector = if (hasText) Icons.AutoMirrored.Filled.Send else Icons.Default.Mic,
                                 contentDescription = if (hasText) "Send" else "Voice message",
-                                tint = if (scheme.isDark) Color(0xFF06070C) else Color.White,
+                                tint = Color.White,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
@@ -1629,7 +1830,7 @@ fun ChatRoomScreen(
         }
     }
 
-    // Message Action Sheet / Dialog
+    // Message Action Sheet / Dialog (`👍 ❤️ 🔥 😂 😮 🙏 🎯 💯`, Reply, Edit, Copy, Pin, Delete)
     selectedMessageForActions?.let { targetMsg ->
         val isMe = targetMsg.senderId == currentUserId
         val isPinned = state.pinnedMessages.any { it.id == targetMsg.id }
@@ -1642,26 +1843,31 @@ fun ChatRoomScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.55f))
+                    .background(Color.Black.copy(alpha = 0.62f))
                     .clickable { selectedMessageForActions = null },
                 contentAlignment = Alignment.BottomCenter
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
-                        .background(scheme.surface)
-                        .border(1.dp, scheme.border, RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+                        .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
+                        .background(scheme.surface.copy(alpha = 0.92f))
+                        .background(LiquidGlassFillBrush)
+                        .border(
+                            width = 1.dp,
+                            brush = LiquidGlassSpecularBorderBrush,
+                            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+                        )
                         .clickable(enabled = false) {}
-                        .padding(20.dp),
+                        .padding(22.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Box(
                         modifier = Modifier
-                            .width(40.dp)
+                            .width(42.dp)
                             .height(4.dp)
                             .clip(RoundedCornerShape(2.dp))
-                            .background(scheme.muted.copy(alpha = 0.45f))
+                            .background(Color.White.copy(alpha = 0.35f))
                             .align(Alignment.CenterHorizontally)
                     )
 
@@ -1669,8 +1875,9 @@ fun ChatRoomScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(scheme.surfaceAlt)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(Color.White.copy(alpha = 0.09f))
+                            .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(20.dp))
                             .padding(horizontal = 8.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.SpaceEvenly,
                         verticalAlignment = Alignment.CenterVertically
@@ -1757,7 +1964,7 @@ fun ChatRoomScreen(
         }
     }
 
-    // Attach Bottom Sheet Modal (`AttachSheet.jsx`: 6 exact options or AI model/mode picker if `chat.isAiChat`)
+    // Attach Frosted Glass Bottom Sheet Modal
     if (showAttachSheet) {
         Dialog(
             onDismissRequest = { showAttachSheet = false },
@@ -1766,33 +1973,38 @@ fun ChatRoomScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.55f))
+                    .background(Color.Black.copy(alpha = 0.62f))
                     .clickable { showAttachSheet = false },
                 contentAlignment = Alignment.BottomCenter
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
-                        .background(scheme.surface)
-                        .border(1.dp, scheme.border, RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+                        .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
+                        .background(scheme.surface.copy(alpha = 0.92f))
+                        .background(LiquidGlassFillBrush)
+                        .border(
+                            width = 1.dp,
+                            brush = LiquidGlassSpecularBorderBrush,
+                            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+                        )
                         .clickable(enabled = false) {}
-                        .padding(20.dp),
+                        .padding(22.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Box(
                         modifier = Modifier
-                            .width(40.dp)
+                            .width(42.dp)
                             .height(4.dp)
                             .clip(RoundedCornerShape(2.dp))
-                            .background(scheme.muted.copy(alpha = 0.45f))
+                            .background(Color.White.copy(alpha = 0.35f))
                             .align(Alignment.CenterHorizontally)
                     )
 
                     if (chat.isAiChat) {
                         Text(
                             text = tr(lang, "Режим Neongram AI", "Neongram AI режими", "Neongram AI Mode"),
-                            color = scheme.text,
+                            color = Color(0xFFF8FAFF),
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -1806,12 +2018,14 @@ fun ChatRoomScreen(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(if (selected) scheme.bg else scheme.surfaceAlt)
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .background(
+                                        if (selected) Color(0xFF00F0FF).copy(alpha = 0.14f) else Color.White.copy(alpha = 0.08f)
+                                    )
                                     .border(
                                         width = 1.dp,
-                                        color = if (selected) scheme.primary else scheme.border,
-                                        shape = RoundedCornerShape(14.dp)
+                                        color = if (selected) Color(0xFF00F0FF) else Color.White.copy(alpha = 0.16f),
+                                        shape = RoundedCornerShape(18.dp)
                                     )
                                     .clickable {
                                         aiMode = modeTitle
@@ -1825,13 +2039,13 @@ fun ChatRoomScreen(
                                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                     Text(
                                         text = modeTitle,
-                                        color = scheme.text,
+                                        color = Color(0xFFF8FAFF),
                                         fontSize = 15.sp,
                                         fontWeight = FontWeight.Bold
                                     )
                                     Text(
                                         text = modeSubtitle,
-                                        color = scheme.muted,
+                                        color = Color(0xFFB4BEE0),
                                         fontSize = 12.sp
                                     )
                                 }
@@ -1839,7 +2053,7 @@ fun ChatRoomScreen(
                                     Icon(
                                         imageVector = Icons.Default.CheckCircle,
                                         contentDescription = "Selected",
-                                        tint = scheme.primary,
+                                        tint = Color(0xFF00F0FF),
                                         modifier = Modifier.size(20.dp)
                                     )
                                 }
@@ -1848,7 +2062,7 @@ fun ChatRoomScreen(
                     } else {
                         Text(
                             text = tr(lang, "Прикрепить", "Тиркөө", "Attach"),
-                            color = scheme.text,
+                            color = Color(0xFFF8FAFF),
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -1871,9 +2085,9 @@ fun ChatRoomScreen(
                                     Row(
                                         modifier = Modifier
                                             .weight(1f)
-                                            .clip(RoundedCornerShape(14.dp))
-                                            .background(scheme.surfaceAlt)
-                                            .border(1.dp, scheme.border, RoundedCornerShape(14.dp))
+                                            .clip(RoundedCornerShape(18.dp))
+                                            .background(Color.White.copy(alpha = 0.08f))
+                                            .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(18.dp))
                                             .clickable {
                                                 showAttachSheet = false
                                                 viewModel.sendMessage(sampleTag)
@@ -1885,20 +2099,20 @@ fun ChatRoomScreen(
                                         Box(
                                             modifier = Modifier
                                                 .size(34.dp)
-                                                .clip(RoundedCornerShape(10.dp))
-                                                .background(scheme.primary.copy(alpha = 0.14f)),
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .background(Color(0xFF00F0FF).copy(alpha = 0.14f)),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Icon(
                                                 imageVector = icon,
                                                 contentDescription = label,
-                                                tint = scheme.primary,
+                                                tint = Color(0xFF00F0FF),
                                                 modifier = Modifier.size(18.dp)
                                             )
                                         }
                                         Text(
                                             text = label,
-                                            color = scheme.text,
+                                            color = Color(0xFFF8FAFF),
                                             fontSize = 14.sp,
                                             fontWeight = FontWeight.SemiBold,
                                             maxLines = 1,
@@ -1916,11 +2130,12 @@ fun ChatRoomScreen(
 }
 
 /**
- * 1:1 with `MessageBubble.jsx`:
- * - Outgoing (`isMe`): aligned right, `scheme.bubbleMe` bg, corner radii `(topStart = 18.dp, topEnd = 8.dp, bottomStart = 18.dp, bottomEnd = 18.dp)`.
- * - Incoming (`!isMe`): aligned left, `scheme.bubbleOther` bg, corner radii `(topStart = 8.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 18.dp)`.
- * - Supports Group Author Name, Reply Quote Block, Forwarded Label, PHOTO / VOICE / FILE / SYSTEM / TEXT with code blocks,
- *   Reactions Row, and Meta Footer (`"изменено"` + `HH:mm` + `DoneAll` checkmarks).
+ * Liquid Glass Message Bubbles (`template_3_ios_liquid_aurora`):
+ * - Outgoing (`isMe`): `RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp, bottomStart = 22.dp, bottomEnd = 6.dp)`,
+ *   filled with translucent Aurora Violet-Cyan gradient (`Brush.horizontalGradient(listOf(Color(0xCC6D28D9), Color(0xB30891B2)))`)
+ *   and `1.dp` specular border (`Color.White.copy(alpha = 0.35f)`).
+ * - Incoming (`!isMe`): `RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp, bottomStart = 6.dp, bottomEnd = 22.dp)`,
+ *   filled with frosted glass (`Color.White.copy(alpha = 0.11f)`) and `1.dp` glass border (`Color.White.copy(alpha = 0.22f)`).
  */
 @Composable
 private fun MessageBubbleItem(
@@ -1936,43 +2151,61 @@ private fun MessageBubbleItem(
 
     val bubbleShape = if (isMe) {
         RoundedCornerShape(
-            topStart = 18.dp,
-            topEnd = 8.dp,
-            bottomStart = 18.dp,
-            bottomEnd = 18.dp
+            topStart = 22.dp,
+            topEnd = 22.dp,
+            bottomStart = 22.dp,
+            bottomEnd = 6.dp
         )
     } else {
         RoundedCornerShape(
-            topStart = 8.dp,
-            topEnd = 18.dp,
-            bottomStart = 18.dp,
-            bottomEnd = 18.dp
+            topStart = 22.dp,
+            topEnd = 22.dp,
+            bottomStart = 6.dp,
+            bottomEnd = 22.dp
         )
     }
 
-    val bubbleBg = if (isMe) scheme.bubbleMe else scheme.bubbleOther
+    val bubbleBorderColor = if (isMe) {
+        Color.White.copy(alpha = 0.35f)
+    } else {
+        Color.White.copy(alpha = 0.22f)
+    }
+
     val timeText = formatIsoTimeToHhMm(msg.createdAt)
+
+    val bubbleModifier = if (isMe) {
+        Modifier
+            .widthIn(min = 96.dp, max = 315.dp)
+            .clip(bubbleShape)
+            .background(OutgoingAuroraBubbleBrush)
+            .border(1.dp, bubbleBorderColor, bubbleShape)
+            .clickable(onClick = onClickMessage)
+            .padding(horizontal = 14.dp, vertical = 10.dp)
+    } else {
+        Modifier
+            .widthIn(min = 96.dp, max = 315.dp)
+            .clip(bubbleShape)
+            .background(scheme.surface.copy(alpha = 0.55f))
+            .background(Color.White.copy(alpha = 0.11f))
+            .border(1.dp, bubbleBorderColor, bubbleShape)
+            .clickable(onClick = onClickMessage)
+            .padding(horizontal = 14.dp, vertical = 10.dp)
+    }
 
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (isMe) Arrangement.End else Arrangement.Start
     ) {
         Column(
-            modifier = Modifier
-                .widthIn(min = 96.dp, max = 310.dp)
-                .clip(bubbleShape)
-                .background(bubbleBg)
-                .border(1.dp, scheme.border.copy(alpha = 0.7f), bubbleShape)
-                .clickable(onClick = onClickMessage)
-                .padding(horizontal = 12.dp, vertical = 9.dp),
+            modifier = bubbleModifier,
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            // Group author name in `scheme.primary` (`12.sp`, Bold) if `chat.type == "GROUP" && !isMe`
+            // Group author name if `isGroupChat && !isMe`
             if (isGroupChat && !isMe) {
                 val authorName = msg.sender?.effectiveName?.takeIf { it.isNotBlank() } ?: "Neongram User"
                 Text(
                     text = authorName,
-                    color = scheme.primary,
+                    color = Color(0xFF00F0FF),
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
@@ -1980,14 +2213,15 @@ private fun MessageBubbleItem(
                 )
             }
 
-            // Reply Quote Block (if `msg.replyTo != null`): rounded-10 box with 3.dp vertical primary bar + author name + reply snippet
+            // Reply Quote Block
             msg.replyTo?.let { reply ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(scheme.bg.copy(alpha = 0.38f))
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color.Black.copy(alpha = 0.26f))
+                        .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 9.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
@@ -1996,7 +2230,7 @@ private fun MessageBubbleItem(
                             .width(3.dp)
                             .height(28.dp)
                             .clip(RoundedCornerShape(2.dp))
-                            .background(scheme.primary)
+                            .background(Color(0xFF00F0FF))
                     )
                     Column(
                         modifier = Modifier.weight(1f),
@@ -2004,7 +2238,7 @@ private fun MessageBubbleItem(
                     ) {
                         Text(
                             text = reply.sender?.effectiveName ?: tr(lang, "Сообщение", "Билдирүү", "Message"),
-                            color = scheme.primary,
+                            color = Color(0xFF00F0FF),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
@@ -2013,7 +2247,7 @@ private fun MessageBubbleItem(
                         Text(
                             text = reply.content?.removePrefix("[FWD]")?.trim()?.ifBlank { reply.type }
                                 ?: reply.type,
-                            color = scheme.bubbleMuted,
+                            color = Color(0xFFD6E0FF),
                             fontSize = 12.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -2022,11 +2256,11 @@ private fun MessageBubbleItem(
                 }
             }
 
-            // Forwarded Label (if `msg.isForwarded`): `"ПЕРЕСЛАНО"` (`11.sp`, uppercase, `bubbleMuted`)
+            // Forwarded Label
             if (msg.isForwarded) {
                 Text(
                     text = tr(lang, "ПЕРЕСЛАНО", "ЖӨНӨТҮЛГӨН", "FORWARDED"),
-                    color = scheme.bubbleMuted,
+                    color = Color(0xFFD6E0FF),
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 0.5.sp
@@ -2047,9 +2281,9 @@ private fun MessageBubbleItem(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(scheme.surface.copy(alpha = 0.7f))
-                            .border(1.dp, scheme.primary.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color.Black.copy(alpha = 0.28f))
+                            .border(1.dp, Color(0xFF00F0FF).copy(alpha = 0.4f), RoundedCornerShape(14.dp))
                             .padding(10.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
@@ -2060,19 +2294,19 @@ private fun MessageBubbleItem(
                             Icon(
                                 imageVector = if (isAlert) Icons.Default.Bolt else Icons.Default.Shield,
                                 contentDescription = "System",
-                                tint = scheme.primary,
+                                tint = Color(0xFF00F0FF),
                                 modifier = Modifier.size(16.dp)
                             )
                             Text(
                                 text = sysTitle,
-                                color = scheme.text,
+                                color = Color(0xFFF8FAFF),
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
                         Text(
                             text = sysBody,
-                            color = scheme.bubbleText,
+                            color = Color(0xFFF8FAFF),
                             fontSize = (14f * scheme.fontScale).sp,
                             lineHeight = 19.sp
                         )
@@ -2085,14 +2319,15 @@ private fun MessageBubbleItem(
                         Box(
                             modifier = Modifier
                                 .size(220.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(scheme.surfaceAlt),
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Color.Black.copy(alpha = 0.25f))
+                                .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(16.dp)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Image,
                                 contentDescription = "Photo",
-                                tint = scheme.muted,
+                                tint = Color(0xFFB4BEE0),
                                 modifier = Modifier.size(36.dp)
                             )
                             if (!photoUrl.isNullOrBlank()) {
@@ -2107,7 +2342,7 @@ private fun MessageBubbleItem(
                         if (msg.cleanContent.isNotBlank()) {
                             Text(
                                 text = msg.cleanContent,
-                                color = scheme.bubbleText,
+                                color = Color(0xFFF8FAFF),
                                 fontSize = (15f * scheme.fontScale).sp,
                                 lineHeight = 20.sp
                             )
@@ -2123,8 +2358,9 @@ private fun MessageBubbleItem(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(scheme.bg.copy(alpha = 0.35f))
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color.Black.copy(alpha = 0.25f))
+                            .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(14.dp))
                             .padding(horizontal = 10.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -2133,13 +2369,13 @@ private fun MessageBubbleItem(
                             modifier = Modifier
                                 .size(36.dp)
                                 .clip(RoundedCornerShape(10.dp))
-                                .background(scheme.primary.copy(alpha = 0.16f)),
+                                .background(Color(0xFF00F0FF).copy(alpha = 0.18f)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Description,
                                 contentDescription = "File",
-                                tint = scheme.primary,
+                                tint = Color(0xFF00F0FF),
                                 modifier = Modifier.size(20.dp)
                             )
                         }
@@ -2150,7 +2386,7 @@ private fun MessageBubbleItem(
                             Text(
                                 text = msg.fileName?.takeIf { it.isNotBlank() }
                                     ?: tr(lang, "Файл", "Файл", "File"),
-                                color = scheme.bubbleText,
+                                color = Color(0xFFF8FAFF),
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
@@ -2159,7 +2395,7 @@ private fun MessageBubbleItem(
                             if (msg.cleanContent.isNotBlank()) {
                                 Text(
                                     text = msg.cleanContent,
-                                    color = scheme.bubbleMuted,
+                                    color = Color(0xFFD6E0FF),
                                     fontSize = 12.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -2170,13 +2406,13 @@ private fun MessageBubbleItem(
                             modifier = Modifier
                                 .size(22.dp)
                                 .clip(CircleShape)
-                                .background(scheme.primary.copy(alpha = 0.2f)),
+                                .background(Color(0xFF00F0FF).copy(alpha = 0.22f)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Check,
                                 contentDescription = "Downloaded",
-                                tint = scheme.primary,
+                                tint = Color(0xFF00F0FF),
                                 modifier = Modifier.size(14.dp)
                             )
                         }
@@ -2191,7 +2427,7 @@ private fun MessageBubbleItem(
                 }
             }
 
-            // Reactions Row (if `msg.reactions.isNotEmpty()`): grouped emoji pills with counts
+            // Reactions Row: grouped emoji pills with counts
             if (msg.reactions.isNotEmpty()) {
                 val grouped = remember(msg.reactions) {
                     msg.reactions.groupBy { it.emoji }.mapValues { it.value.size }
@@ -2203,11 +2439,11 @@ private fun MessageBubbleItem(
                     grouped.forEach { (emoji, count) ->
                         Row(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(scheme.bg.copy(alpha = 0.45f))
-                                .border(1.dp, scheme.primary.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Color.Black.copy(alpha = 0.30f))
+                                .border(1.dp, Color(0xFF00F0FF).copy(alpha = 0.45f), RoundedCornerShape(14.dp))
                                 .clickable { onToggleReaction(emoji) }
-                                .padding(horizontal = 7.dp, vertical = 3.dp),
+                                .padding(horizontal = 8.dp, vertical = 3.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
@@ -2217,7 +2453,7 @@ private fun MessageBubbleItem(
                             )
                             Text(
                                 text = count.toString(),
-                                color = scheme.bubbleText,
+                                color = Color(0xFFF8FAFF),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -2226,7 +2462,7 @@ private fun MessageBubbleItem(
                 }
             }
 
-            // Meta Footer: `"изменено"` (if `msg.editedAt != null`) + time `HH:mm` (`11.sp`, `bubbleMuted`) + `DoneAll` checkmarks (`12.dp`, `primary`) for `isMe`
+            // Meta Footer: "изменено" + HH:mm + DoneAll checkmarks
             Row(
                 modifier = Modifier.align(Alignment.End),
                 verticalAlignment = Alignment.CenterVertically,
@@ -2235,14 +2471,14 @@ private fun MessageBubbleItem(
                 if (!msg.editedAt.isNullOrBlank()) {
                     Text(
                         text = tr(lang, "изменено", "өзгөртүлдү", "edited"),
-                        color = scheme.bubbleMuted,
+                        color = Color(0xFFD6E0FF).copy(alpha = 0.85f),
                         fontSize = 11.sp
                     )
                 }
                 if (timeText.isNotBlank()) {
                     Text(
                         text = timeText,
-                        color = scheme.bubbleMuted,
+                        color = Color(0xFFD6E0FF).copy(alpha = 0.85f),
                         fontSize = 11.sp
                     )
                 }
@@ -2250,8 +2486,8 @@ private fun MessageBubbleItem(
                     Icon(
                         imageVector = Icons.Default.DoneAll,
                         contentDescription = "Read",
-                        tint = scheme.primary,
-                        modifier = Modifier.size(12.dp)
+                        tint = Color(0xFF00F0FF),
+                        modifier = Modifier.size(13.dp)
                     )
                 }
             }
@@ -2260,11 +2496,10 @@ private fun MessageBubbleItem(
 }
 
 /**
- * `VOICE`: `AudioMessagePlayer` row with `34.dp` Play button (`primary` tint), 24 vertical waveform bars, and duration `00:12`.
+ * Voice waveform player row inside Liquid Glass bubble
  */
 @Composable
 private fun AudioMessagePlayerRow() {
-    val scheme = LocalNeonScheme.current
     var isPlaying by remember { mutableStateOf(false) }
     val barHeights = remember {
         listOf(
@@ -2284,15 +2519,15 @@ private fun AudioMessagePlayerRow() {
             modifier = Modifier
                 .size(34.dp)
                 .clip(CircleShape)
-                .background(scheme.primary.copy(alpha = 0.18f))
-                .border(1.dp, scheme.primary, CircleShape)
+                .background(Color(0xFF00F0FF).copy(alpha = 0.22f))
+                .border(1.dp, Color(0xFF00F0FF), CircleShape)
                 .clickable { isPlaying = !isPlaying },
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                 contentDescription = "Play voice message",
-                tint = scheme.primary,
+                tint = Color(0xFFF8FAFF),
                 modifier = Modifier.size(18.dp)
             )
         }
@@ -2310,7 +2545,7 @@ private fun AudioMessagePlayerRow() {
                         .height(h.dp)
                         .clip(RoundedCornerShape(2.dp))
                         .background(
-                            if (activeBar) scheme.primary else scheme.primary.copy(alpha = 0.45f)
+                            if (activeBar) Color(0xFF00F0FF) else Color.White.copy(alpha = 0.55f)
                         )
                 )
             }
@@ -2318,7 +2553,7 @@ private fun AudioMessagePlayerRow() {
 
         Text(
             text = "00:12",
-            color = scheme.bubbleMuted,
+            color = Color(0xFFD6E0FF),
             fontSize = 11.sp,
             fontWeight = FontWeight.SemiBold
         )
@@ -2326,18 +2561,17 @@ private fun AudioMessagePlayerRow() {
 }
 
 /**
- * `TEXT`: message text (`16.sp * scheme.fontScale`) with code block formatting if triple backticks are present.
+ * Message text with code block formatting when triple backticks are present
  */
 @Composable
 private fun FormattedMessageText(
     text: String,
     fontScale: Float
 ) {
-    val scheme = LocalNeonScheme.current
     if (!text.contains("```")) {
         Text(
             text = text,
-            color = scheme.bubbleText,
+            color = Color(0xFFF8FAFF),
             fontSize = (16f * fontScale).sp,
             lineHeight = (21f * fontScale).sp
         )
@@ -2350,18 +2584,17 @@ private fun FormattedMessageText(
             val cleanSeg = segment.trim('\n', '\r')
             if (cleanSeg.isNotBlank()) {
                 if (index % 2 == 1) {
-                    // Code block
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(Color(0xFF080A12))
-                            .border(1.dp, scheme.border, RoundedCornerShape(10.dp))
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFF080A14).copy(alpha = 0.85f))
+                            .border(1.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(12.dp))
                             .padding(10.dp)
                     ) {
                         Text(
                             text = cleanSeg,
-                            color = scheme.primary,
+                            color = Color(0xFF00F0FF),
                             fontSize = (13.5f * fontScale).sp,
                             fontFamily = FontFamily.Monospace,
                             lineHeight = (18f * fontScale).sp
@@ -2370,7 +2603,7 @@ private fun FormattedMessageText(
                 } else {
                     Text(
                         text = cleanSeg,
-                        color = scheme.bubbleText,
+                        color = Color(0xFFF8FAFF),
                         fontSize = (16f * fontScale).sp,
                         lineHeight = (21f * fontScale).sp
                     )
@@ -2381,12 +2614,8 @@ private fun FormattedMessageText(
 }
 
 /**
- * 1:1 with `GroupInfoScreen.jsx`:
- * - `PageScaffold` with back button and group title.
- * - Hero Card (`borderRadius = 20.dp`) with 16:9 banner box, group title (`20.sp`, Bold),
- *   `"Участников: ${chat.members.size}"`, `"Публичная группа"` / `"Приватная группа"`.
- * - Quick Actions Row (`"Ссылка"`, `"Добавить участника"`, `"Покинуть группу"`).
- * - `"Участники"` section listing all `chat.members` using `ListRow` with role badge (`"Владелец"`, `"Админ"`, `"Участник"`).
+ * 2026 iOS 18 Liquid Glass & Aurora Violet GroupInfoScreen:
+ * - Styled with Frosted Liquid Glass Hero Card (`RoundedCornerShape(28.dp)`) and Liquid Glass member cards.
  */
 @Composable
 fun GroupInfoScreen(
@@ -2423,36 +2652,38 @@ fun GroupInfoScreen(
         title = groupTitle,
         onBack = { viewModel.navigateBack() }
     ) {
-        // Hero Card (`borderRadius = 20.dp`) with 16:9 banner box, group title (`20.sp`, Bold),
-        // `"Участников: ${chat.members.size}"`, `"Публичная группа"` / `"Приватная группа"`.
+        // Frosted Liquid Glass Hero Card (`RoundedCornerShape(28.dp)`)
+        val heroShape = RoundedCornerShape(28.dp)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(20.dp))
-                .background(scheme.surface)
-                .border(1.dp, scheme.border, RoundedCornerShape(20.dp))
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .clip(heroShape)
+                .background(scheme.surface.copy(alpha = 0.72f))
+                .background(LiquidGlassFillBrush)
+                .border(1.dp, LiquidGlassSpecularBorderBrush, heroShape)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(16f / 9f)
-                    .clip(RoundedCornerShape(16.dp))
+                    .clip(RoundedCornerShape(20.dp))
                     .background(
                         Brush.linearGradient(
                             colors = listOf(
-                                scheme.accent.copy(alpha = 0.55f),
-                                scheme.primary.copy(alpha = 0.45f)
+                                Color(0xFF6D28D9).copy(alpha = 0.75f),
+                                Color(0xFF00F0FF).copy(alpha = 0.55f)
                             )
                         )
-                    ),
+                    )
+                    .border(1.dp, Color.White.copy(alpha = 0.28f), RoundedCornerShape(20.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = groupTitle.take(1).uppercase(),
                     color = Color.White,
-                    fontSize = 42.sp,
+                    fontSize = 44.sp,
                     fontWeight = FontWeight.Black
                 )
                 if (!bannerUrl.isNullOrBlank()) {
@@ -2465,12 +2696,12 @@ fun GroupInfoScreen(
                 }
             }
 
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text(
                     text = groupTitle,
-                    color = scheme.text,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold
+                    color = Color(0xFFF8FAFF),
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.ExtraBold
                 )
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -2478,12 +2709,12 @@ fun GroupInfoScreen(
                 ) {
                     Text(
                         text = "${tr(lang, "Участников", "Катышуучулар", "Members")}: ${chat.members.size}",
-                        color = scheme.muted,
+                        color = Color(0xFFB4BEE0),
                         fontSize = 14.sp
                     )
                     Text(
                         text = "•",
-                        color = scheme.muted,
+                        color = Color(0xFF9AA6D1),
                         fontSize = 14.sp
                     )
                     Text(
@@ -2492,9 +2723,9 @@ fun GroupInfoScreen(
                         } else {
                             tr(lang, "Публичная группа", "Ачык тайпа", "Public group")
                         },
-                        color = scheme.primary,
+                        color = Color(0xFF00F0FF),
                         fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
@@ -2503,7 +2734,7 @@ fun GroupInfoScreen(
         // Quick Actions Row (`"Ссылка"`, `"Добавить участника"`, `"Покинуть группу"`)
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             GroupQuickActionButton(
                 icon = Icons.Default.Link,
@@ -2532,7 +2763,7 @@ fun GroupInfoScreen(
             )
         }
 
-        // `"Участники"` section listing all `chat.members` using `ListRow` with role badge (`"Владелец"`, `"Админ"`, `"Участник"`)
+        // Members Section
         SectionUppercaseHeader(
             title = tr(lang, "Участники", "Катышуучулар", "Members")
         )
@@ -2543,7 +2774,7 @@ fun GroupInfoScreen(
             )
         } else {
             chat.members.forEach { member ->
-                GroupMemberListRow(
+                GroupMemberGlassCard(
                     member = member,
                     serverUrl = serverUrl,
                     lang = lang,
@@ -2562,15 +2793,16 @@ fun GroupInfoScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(scheme.surface)
-                    .border(1.dp, scheme.border, RoundedCornerShape(20.dp))
-                    .padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                    .clip(RoundedCornerShape(26.dp))
+                    .background(scheme.surface.copy(alpha = 0.94f))
+                    .background(LiquidGlassFillBrush)
+                    .border(1.dp, LiquidGlassSpecularBorderBrush, RoundedCornerShape(26.dp))
+                    .padding(22.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 Text(
                     text = tr(lang, "Добавить участника", "Катышуучу кошуу", "Add member"),
-                    color = scheme.text,
+                    color = Color(0xFFF8FAFF),
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -2613,21 +2845,24 @@ private fun GroupQuickActionButton(
     onClick: () -> Unit
 ) {
     val scheme = LocalNeonScheme.current
-    val fg = if (danger) scheme.danger else scheme.text
+    val shape = RoundedCornerShape(22.dp)
+    val fg = if (danger) scheme.danger else Color(0xFFF8FAFF)
+
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(scheme.surface)
-            .border(1.dp, scheme.border, RoundedCornerShape(16.dp))
+            .clip(shape)
+            .background(scheme.surface.copy(alpha = 0.72f))
+            .background(LiquidGlassFillBrush)
+            .border(1.dp, LiquidGlassSpecularBorderBrush, shape)
             .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 12.dp),
+            .padding(horizontal = 8.dp, vertical = 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         Icon(
             imageVector = icon,
             contentDescription = label,
-            tint = if (danger) scheme.danger else scheme.primary,
+            tint = if (danger) scheme.danger else Color(0xFF00F0FF),
             modifier = Modifier.size(20.dp)
         )
         Text(
@@ -2643,7 +2878,7 @@ private fun GroupQuickActionButton(
 }
 
 @Composable
-private fun GroupMemberListRow(
+private fun GroupMemberGlassCard(
     member: ChatMemberDto,
     serverUrl: String,
     lang: String,
@@ -2656,33 +2891,77 @@ private fun GroupMemberListRow(
     val avatarUrl = resolveFullMediaUrl(user?.avatarUrl, serverUrl)
 
     val (roleLabel, roleColor) = when (member.role.uppercase()) {
-        "OWNER", "CREATOR" -> tr(lang, "Владелец", "Ээси", "Owner") to scheme.primary
-        "ADMIN", "ADMINISTRATOR" -> tr(lang, "Админ", "Админ", "Admin") to scheme.accent
-        else -> tr(lang, "Участник", "Катышуучу", "Member") to scheme.muted
+        "OWNER", "CREATOR" -> tr(lang, "Владелец", "Ээси", "Owner") to Color(0xFF00F0FF)
+        "ADMIN", "ADMINISTRATOR" -> tr(lang, "Админ", "Админ", "Admin") to Color(0xFFA855F7)
+        else -> tr(lang, "Участник", "Катышуучу", "Member") to Color(0xFF9AA6D1)
     }
 
-    ListRow(
-        title = title,
-        subtitle = subtitle,
-        avatarUrl = avatarUrl,
-        avatarLabel = title,
-        showChevron = false,
-        onClick = onClick,
-        rightContent = {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(roleColor.copy(alpha = 0.15f))
-                    .border(1.dp, roleColor.copy(alpha = 0.45f), RoundedCornerShape(8.dp))
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
-            ) {
+    val cardShape = RoundedCornerShape(24.dp)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(cardShape)
+            .background(scheme.surface.copy(alpha = 0.72f))
+            .background(LiquidGlassFillBrush)
+            .border(1.dp, LiquidGlassSpecularBorderBrush, cardShape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(46.dp)
+                .clip(CircleShape)
+                .border(1.6.dp, NeonAvatarRingBrush, CircleShape)
+                .padding(2.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            NeonAvatar(
+                avatarUrl = avatarUrl,
+                label = title,
+                sizeDp = 42.dp,
+                cornerRadiusDp = 21.dp
+            )
+        }
+
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                text = title,
+                color = Color(0xFFF8FAFF),
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (subtitle.isNotBlank()) {
                 Text(
-                    text = roleLabel,
-                    color = roleColor,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold
+                    text = subtitle,
+                    color = Color(0xFFB4BEE0),
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }
-    )
+
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .background(roleColor.copy(alpha = 0.16f))
+                .border(1.dp, roleColor.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
+                .padding(horizontal = 10.dp, vertical = 4.dp)
+        ) {
+            Text(
+                text = roleLabel,
+                color = roleColor,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
 }

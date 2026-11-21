@@ -62,10 +62,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -112,24 +114,24 @@ fun parseHexColorOrNull(hex: String?): Color? {
 data class NeonScheme(
     val id: String = "cyber_dark",
     val isDark: Boolean = true,
-    val bg: Color = Color(0xFF0A0B10),
-    val bgAlt: Color = Color(0xFF0F1220),
-    val surface: Color = Color(0xFF15182A),
-    val surfaceAlt: Color = Color(0xFF1B1F36),
-    val text: Color = Color(0xFFE7EAFF),
-    val muted: Color = Color(0xFF9AA3C1),
-    val primary: Color = Color(0xFF2FF2FF),
-    val accent: Color = Color(0xFF7C5CFF),
-    val border: Color = Color(0xFF242A44),
-    val bubbleMe: Color = Color(0xFF1F2A44),
-    val bubbleOther: Color = Color(0xFF141927),
-    val bubbleText: Color = Color(0xFFE7EAFF),
-    val bubbleMuted: Color = Color(0xFFB1B8D5),
-    val inputBg: Color = Color(0xFF111626),
-    val tabBar: Color = Color(0xFF0E1120),
-    val danger: Color = Color(0xFFFF4D6D),
-    val gradientStart: Color = Color(0xFF0B0E1A),
-    val gradientEnd: Color = Color(0xFF07070D),
+    val bg: Color = Color(0xFF060714),
+    val bgAlt: Color = Color(0xFF0C0E24),
+    val surface: Color = Color(0x451A1E40),
+    val surfaceAlt: Color = Color(0x66252B58),
+    val text: Color = Color(0xFFF6F8FF),
+    val muted: Color = Color(0xFFA5B0D6),
+    val primary: Color = Color(0xFF38F2FF),
+    val accent: Color = Color(0xFFA855F7),
+    val border: Color = Color(0x4DFFFFFF),
+    val bubbleMe: Color = Color(0x754C1D95),
+    val bubbleOther: Color = Color(0x4D1E2448),
+    val bubbleText: Color = Color(0xFFF8FAFF),
+    val bubbleMuted: Color = Color(0xFFB8C2E8),
+    val inputBg: Color = Color(0x52161B38),
+    val tabBar: Color = Color(0x78121630),
+    val danger: Color = Color(0xFFFF4D7D),
+    val gradientStart: Color = Color(0xFF060714),
+    val gradientEnd: Color = Color(0xFF0B0722),
     val fontScale: Float = 1.0f,
     val wallpaper: String = "gradient"
 ) {
@@ -149,78 +151,80 @@ data class NeonScheme(
     val dangerRed: Color get() = danger
 }
 
-val CyberDarkScheme = NeonScheme(
+val LiquidAuroraDark = NeonScheme(
     id = "cyber_dark",
     isDark = true,
-    bg = Color(0xFF0A0B10),
-    bgAlt = Color(0xFF0F1220),
-    surface = Color(0xFF15182A),
-    surfaceAlt = Color(0xFF1B1F36),
-    text = Color(0xFFE7EAFF),
-    muted = Color(0xFF9AA3C1),
-    primary = Color(0xFF2FF2FF),
-    accent = Color(0xFF7C5CFF),
-    border = Color(0xFF242A44),
-    bubbleMe = Color(0xFF1F2A44),
-    bubbleOther = Color(0xFF141927),
-    bubbleText = Color(0xFFE7EAFF),
-    bubbleMuted = Color(0xFFB1B8D5),
-    inputBg = Color(0xFF111626),
-    tabBar = Color(0xFF0E1120),
-    danger = Color(0xFFFF4D6D),
-    gradientStart = Color(0xFF0B0E1A),
-    gradientEnd = Color(0xFF07070D)
+    bg = Color(0xFF060714),
+    bgAlt = Color(0xFF0C0E24),
+    surface = Color(0x451A1E40),
+    surfaceAlt = Color(0x66252B58),
+    text = Color(0xFFF6F8FF),
+    muted = Color(0xFFA5B0D6),
+    primary = Color(0xFF38F2FF),
+    accent = Color(0xFFA855F7),
+    border = Color(0x4DFFFFFF),
+    bubbleMe = Color(0x754C1D95),
+    bubbleOther = Color(0x4D1E2448),
+    bubbleText = Color(0xFFF8FAFF),
+    bubbleMuted = Color(0xFFB8C2E8),
+    inputBg = Color(0x52161B38),
+    tabBar = Color(0x78121630),
+    danger = Color(0xFFFF4D7D),
+    gradientStart = Color(0xFF060714),
+    gradientEnd = Color(0xFF0B0722)
 )
+
+val CyberDarkScheme = LiquidAuroraDark
 
 val CyberLightScheme = NeonScheme(
     id = "cyber_light",
     isDark = false,
-    bg = Color(0xFFF4F7FF),
-    bgAlt = Color(0xFFEDF1FF),
-    surface = Color(0xFFFFFFFF),
-    surfaceAlt = Color(0xFFF2F4FF),
-    text = Color(0xFF0E1324),
-    muted = Color(0xFF5C6A92),
+    bg = Color(0xFFF2F5FF),
+    bgAlt = Color(0xFFE8EDFF),
+    surface = Color(0xA6FFFFFF),
+    surfaceAlt = Color(0xCCEEF2FF),
+    text = Color(0xFF0C1226),
+    muted = Color(0xFF56648C),
     primary = Color(0xFF00B7E8),
-    accent = Color(0xFF4B5CFF),
-    border = Color(0xFFD7DDF2),
-    bubbleMe = Color(0xFFDFF6FF),
-    bubbleOther = Color(0xFFFFFFFF),
-    bubbleText = Color(0xFF0E1324),
-    bubbleMuted = Color(0xFF576284),
-    inputBg = Color(0xFFFFFFFF),
-    tabBar = Color(0xFFFFFFFF),
+    accent = Color(0xFF7C3AED),
+    border = Color(0x80FFFFFF),
+    bubbleMe = Color(0xCCDBEAFE),
+    bubbleOther = Color(0xB3FFFFFF),
+    bubbleText = Color(0xFF0C1226),
+    bubbleMuted = Color(0xFF525F82),
+    inputBg = Color(0xB3FFFFFF),
+    tabBar = Color(0xCCFFFFFF),
     danger = Color(0xFFE53950),
-    gradientStart = Color(0xFFF4F7FF),
-    gradientEnd = Color(0xFFE8EEFF)
+    gradientStart = Color(0xFFF2F5FF),
+    gradientEnd = Color(0xFFE5ECFF)
 )
 
 val NeonPurpleScheme = NeonScheme(
     id = "neon_purple",
     isDark = true,
-    bg = Color(0xFF0D0A14),
-    bgAlt = Color(0xFF120E1D),
-    surface = Color(0xFF1B152B),
-    surfaceAlt = Color(0xFF231B38),
-    text = Color(0xFFF3E9FF),
-    muted = Color(0xFFB6A7D6),
-    primary = Color(0xFFD15CFF),
-    accent = Color(0xFF29F0FF),
-    border = Color(0xFF2C2442),
-    bubbleMe = Color(0xFF2E1F4F),
-    bubbleOther = Color(0xFF1A132B),
-    bubbleText = Color(0xFFF3E9FF),
+    bg = Color(0xFF090516),
+    bgAlt = Color(0xFF110A26),
+    surface = Color(0x4D241445),
+    surfaceAlt = Color(0x6E321C5E),
+    text = Color(0xFFF7F0FF),
+    muted = Color(0xFFBFAEE0),
+    primary = Color(0xFFD946EF),
+    accent = Color(0xFF38F2FF),
+    border = Color(0x4DFFFFFF),
+    bubbleMe = Color(0x7A581C87),
+    bubbleOther = Color(0x4D22153D),
+    bubbleText = Color(0xFFF7F0FF),
     bubbleMuted = Color(0xFFD7C8F5),
-    inputBg = Color(0xFF171125),
-    tabBar = Color(0xFF120E1D),
+    inputBg = Color(0x521C1036),
+    tabBar = Color(0x78140B29),
     danger = Color(0xFFFF4D9A),
-    gradientStart = Color(0xFF120E1D),
-    gradientEnd = Color(0xFF07050D)
+    gradientStart = Color(0xFF090516),
+    gradientEnd = Color(0xFF14082E)
 )
 
 val NeonThemeList = listOf(CyberDarkScheme, CyberLightScheme, NeonPurpleScheme)
 
-val LocalNeonScheme = staticCompositionLocalOf { CyberDarkScheme }
+val LocalNeonScheme = staticCompositionLocalOf { LiquidAuroraDark }
 
 @Composable
 fun NeongramTheme(
@@ -234,10 +238,10 @@ fun NeongramTheme(
 ) {
     val systemDark = isSystemInDarkTheme()
     val baseScheme = when {
-        useSystemTheme -> if (systemDark) CyberDarkScheme else CyberLightScheme
+        useSystemTheme -> if (systemDark) LiquidAuroraDark else CyberLightScheme
         themeId == "cyber_light" || themeId == "cyberLight" -> CyberLightScheme
         themeId == "neon_purple" || themeId == "neonPurple" -> NeonPurpleScheme
-        else -> CyberDarkScheme
+        else -> LiquidAuroraDark
     }
 
     val customBubbleColor = parseHexColorOrNull(bubbleColorHex)
@@ -255,7 +259,7 @@ fun NeongramTheme(
     val resolvedScheme = baseScheme.copy(
         bubbleMe = customBubbleColor ?: baseScheme.bubbleMe,
         bubbleOther = if (bubbleScope.lowercase() == "all" && customBubbleColor != null) {
-            customBubbleColor.copy(alpha = 0.78f)
+            customBubbleColor.copy(alpha = 0.72f)
         } else {
             baseScheme.bubbleOther
         },
@@ -270,7 +274,7 @@ fun NeongramTheme(
             tertiary = resolvedScheme.danger,
             background = resolvedScheme.bg,
             surface = resolvedScheme.surface,
-            onPrimary = Color(0xFF06070C),
+            onPrimary = Color(0xFF060714),
             onBackground = resolvedScheme.text,
             onSurface = resolvedScheme.text,
             error = resolvedScheme.danger
@@ -298,8 +302,11 @@ fun NeongramTheme(
 }
 
 /**
- * 1:1 with `AnimatedBackground.jsx`:
- * LinearGradient base + 6000ms pulsing diagonal overlay + support for `gradient`, `mesh`, and `grid` wallpapers.
+ * 2026 iOS 18 Liquid Glass & Aurora Borealis Background:
+ * Deep midnight base (`#060714` -> `#0B0722`) with 3 smoothly drifting, breathing radial glowing orbs:
+ * - Orb 1: Electric Aurora Violet (`Color(0x669333EA)`) drifting in top-left/center
+ * - Orb 2: Liquid Cyan (`Color(0x5506B6D4)`) drifting in center-right
+ * - Orb 3: Deep Magenta-Blue (`Color(0x4D3B82F6)`) drifting in bottom-left
  */
 @Composable
 fun AnimatedNeonBackground(
@@ -309,86 +316,138 @@ fun AnimatedNeonBackground(
     val scheme = LocalNeonScheme.current
     val activeWallpaper = wallpaperOverride ?: scheme.wallpaper
 
-    val infiniteTransition = rememberInfiniteTransition(label = "NeonBgPulse")
-    val pulse by infiniteTransition.animateFloat(
+    val infiniteTransition = rememberInfiniteTransition(label = "LiquidAuroraBg")
+    val drift1 by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 6000, easing = FastOutSlowInEasing),
+            animation = tween(durationMillis = 7500, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
-        label = "pulse"
+        label = "drift1"
+    )
+    val drift2 by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 9200, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "drift2"
+    )
+    val drift3 by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 6400, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "drift3"
     )
 
-    val (minAlpha, maxAlpha) = when (activeWallpaper) {
-        "mesh" -> 0.14f to 0.34f
-        "grid" -> 0.05f to 0.18f
-        else -> 0.08f to 0.26f
-    }
-    val overlayAlpha = minAlpha + (maxAlpha - minAlpha) * pulse
+    val baseStart = if (scheme.isDark) Color(0xFF060714) else scheme.gradientStart
+    val baseEnd = if (scheme.isDark) Color(0xFF0B0722) else scheme.gradientEnd
 
-    val overlayColors = when (activeWallpaper) {
-        "mesh" -> listOf(
-            scheme.accent.copy(alpha = 0.45f),
-            scheme.primary.copy(alpha = 0.33f)
-        )
-        "grid" -> listOf(
-            scheme.primary.copy(alpha = 0.22f),
-            scheme.accent.copy(alpha = 0.16f)
-        )
-        else -> listOf(
-            scheme.accent.copy(alpha = 0.35f),
-            scheme.primary.copy(alpha = 0.25f)
-        )
-    }
+    val orb1Color = if (scheme.isDark) Color(0x669333EA) else Color(0x339333EA)
+    val orb2Color = if (scheme.isDark) Color(0x5506B6D4) else Color(0x2E06B6D4)
+    val orb3Color = if (scheme.isDark) Color(0x4D3B82F6) else Color(0x293B82F6)
 
     Box(modifier = modifier.fillMaxSize()) {
-        // Base gradient
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.linearGradient(
-                        colors = listOf(scheme.gradientStart, scheme.gradientEnd),
-                        start = Offset.Zero,
-                        end = Offset(1000f, 1800f)
-                    )
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            // Deep Midnight Indigo-Violet Base Gradient
+            drawRect(
+                brush = Brush.linearGradient(
+                    colors = listOf(baseStart, baseEnd),
+                    start = Offset.Zero,
+                    end = Offset(size.width, size.height)
                 )
-        )
-        // Animated pulsing overlay gradient
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .alpha(overlayAlpha)
-                .background(
-                    Brush.linearGradient(
-                        colors = overlayColors,
-                        start = Offset(0f, 1800f),
-                        end = Offset(1000f, 0f)
-                    )
+            )
+
+            val w = size.width.coerceAtLeast(1f)
+            val h = size.height.coerceAtLeast(1f)
+            val minDim = minOf(w, h)
+
+            // Orb 1: Electric Aurora Violet drifting in top-left / center
+            val orb1Center = Offset(
+                x = w * (0.20f + 0.22f * drift1),
+                y = h * (0.16f + 0.16f * drift2)
+            )
+            val orb1Radius = (minDim * (0.68f + 0.14f * drift3)).coerceAtLeast(10f)
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(orb1Color, Color.Transparent),
+                    center = orb1Center,
+                    radius = orb1Radius
+                ),
+                radius = orb1Radius,
+                center = orb1Center
+            )
+
+            // Orb 2: Liquid Cyan drifting in center-right
+            val orb2Center = Offset(
+                x = w * (0.82f - 0.20f * drift2),
+                y = h * (0.44f + 0.16f * drift1)
+            )
+            val orb2Radius = (minDim * (0.64f + 0.15f * drift1)).coerceAtLeast(10f)
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(orb2Color, Color.Transparent),
+                    center = orb2Center,
+                    radius = orb2Radius
+                ),
+                radius = orb2Radius,
+                center = orb2Center
+            )
+
+            // Orb 3: Deep Magenta-Blue drifting in bottom-left
+            val orb3Center = Offset(
+                x = w * (0.25f + 0.24f * drift3),
+                y = h * (0.80f - 0.14f * drift1)
+            )
+            val orb3Radius = (minDim * (0.72f + 0.12f * drift2)).coerceAtLeast(10f)
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(orb3Color, Color.Transparent),
+                    center = orb3Center,
+                    radius = orb3Radius
+                ),
+                radius = orb3Radius,
+                center = orb3Center
+            )
+
+            if (activeWallpaper == "mesh") {
+                val meshCenter = Offset(w * 0.5f, h * 0.5f)
+                val meshRadius = (minDim * 0.85f).coerceAtLeast(10f)
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(scheme.accent.copy(alpha = 0.20f), Color.Transparent),
+                        center = meshCenter,
+                        radius = meshRadius
+                    ),
+                    radius = meshRadius,
+                    center = meshCenter
                 )
-        )
-        // Optional grid lines when wallpaper == "grid"
-        if (activeWallpaper == "grid") {
-            val gridLineColor = scheme.primary.copy(alpha = 0.12f)
-            Canvas(modifier = Modifier.fillMaxSize()) {
+            }
+
+            if (activeWallpaper == "grid") {
+                val gridLineColor = scheme.primary.copy(alpha = 0.10f)
                 val step = 36.dp.toPx()
                 var x = 0f
-                while (x < size.width) {
+                while (x < w) {
                     drawLine(
                         color = gridLineColor,
                         start = Offset(x, 0f),
-                        end = Offset(x, size.height),
+                        end = Offset(x, h),
                         strokeWidth = 1f
                     )
                     x += step
                 }
                 var y = 0f
-                while (y < size.height) {
+                while (y < h) {
                     drawLine(
                         color = gridLineColor,
                         start = Offset(0f, y),
-                        end = Offset(size.width, y),
+                        end = Offset(w, y),
                         strokeWidth = 1f
                     )
                     y += step
@@ -398,26 +457,66 @@ fun AnimatedNeonBackground(
     }
 }
 
+/**
+ * 2026 iOS 18 Liquid Glass Card Container:
+ * Translucent glass fill blended over `scheme.surface` with a specular 1.dp gradient rim border.
+ */
+@Composable
+fun LiquidGlassCard(
+    modifier: Modifier = Modifier,
+    cornerRadius: Dp = 26.dp,
+    onClick: (() -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val scheme = LocalNeonScheme.current
+    val shape = RoundedCornerShape(cornerRadius)
+    val glassHighlightBrush = Brush.verticalGradient(
+        colors = listOf(
+            Color.White.copy(alpha = 0.14f),
+            Color.White.copy(alpha = 0.05f)
+        )
+    )
+    val rimBorderBrush = Brush.linearGradient(
+        colors = listOf(
+            Color.White.copy(alpha = 0.42f),
+            scheme.primary.copy(alpha = 0.25f),
+            Color.White.copy(alpha = 0.08f)
+        )
+    )
+
+    val clickMod = if (onClick != null) {
+        Modifier.clickable(onClick = onClick)
+    } else {
+        Modifier
+    }
+
+    Column(
+        modifier = modifier
+            .clip(shape)
+            .background(scheme.surface)
+            .background(glassHighlightBrush)
+            .border(width = 1.dp, brush = rimBorderBrush, shape = shape)
+            .then(clickMod),
+        content = content
+    )
+}
+
 private val BrandNeonColors = listOf(
-    Color(0xFF00B8FF),
-    Color(0xFF7C3AED),
-    Color(0xFFB026FF),
+    Color(0xFF38F2FF),
+    Color(0xFFA855F7),
+    Color(0xFFC084FC),
     Color(0xFFFF2EF7),
     Color(0xFFD946EF),
-    Color(0xFFFF3D81),
-    Color(0xFF4D6DFF),
+    Color(0xFFFF4D7D),
+    Color(0xFF6366F1),
     Color(0xFF00E5FF),
     Color(0xFF5CFFCD),
-    Color(0xFF39FF14),
-    Color(0xFFFFE600),
-    Color(0xFFFF8A00),
     Color(0xFF7DD3FC),
     Color(0xFFFFFFFF)
 )
 
 /**
- * 1:1 with `CyberBrandTitle` in `ChatsScreen.jsx`:
- * Animated neon letter color wipe with dual glow + core text layers.
+ * Animated Liquid Aurora & Neon letter color wipe with dual glow + core text layers.
  */
 @Composable
 fun CyberBrandTitle(
@@ -440,7 +539,7 @@ fun CyberBrandTitle(
                     animationSpec = infiniteRepeatable(
                         animation = keyframes {
                             durationMillis = totalDurationMs
-                            BrandNeonColors.forEachIndexed { colorIdx, c ->
+                            BrandNeonColors.forEachIndexed { colorIdx, _ ->
                                 val shiftedIdx = (colorIdx + index) % BrandNeonColors.size
                                 BrandNeonColors[shiftedIdx] at (colorIdx * (totalDurationMs / BrandNeonColors.size)) using LinearEasing
                             }
@@ -471,8 +570,10 @@ fun CyberBrandTitle(
 }
 
 /**
- * 1:1 with `PrimaryButton.jsx`:
- * minHeight 50.dp, borderRadius 16.dp, primary color fill, bold 16.sp text (`#06070C` in dark theme, `#FFFFFF` in light theme).
+ * 2026 iOS 18 Liquid Pill / Capsule Primary Button:
+ * `RoundedCornerShape(24.dp)`, `minHeight = 54.dp`, filled with a vibrant Liquid Aurora gradient
+ * (`#00E5FF` -> `#7C3AED` -> `#C084FC`), specular top border (`1.dp`, `Color.White.copy(alpha = 0.45f)`),
+ * bold white text (`16.sp`).
  */
 @Composable
 fun PrimaryButton(
@@ -482,23 +583,39 @@ fun PrimaryButton(
     enabled: Boolean = true
 ) {
     val scheme = LocalNeonScheme.current
-    val bgColor = if (enabled) scheme.primary else scheme.surfaceAlt
-    val textColor = if (!enabled) {
-        scheme.muted
-    } else if (scheme.isDark) {
-        Color(0xFF06070C)
+    val shape = RoundedCornerShape(24.dp)
+    val gradientBrush = if (enabled) {
+        Brush.horizontalGradient(
+            colors = listOf(
+                Color(0xFF00E5FF),
+                Color(0xFF7C3AED),
+                Color(0xFFC084FC)
+            )
+        )
     } else {
-        Color(0xFFFFFFFF)
+        Brush.horizontalGradient(
+            colors = listOf(
+                scheme.surfaceAlt,
+                scheme.surface
+            )
+        )
     }
+    val borderColor = if (enabled) {
+        Color.White.copy(alpha = 0.45f)
+    } else {
+        Color.White.copy(alpha = 0.14f)
+    }
+    val textColor = if (enabled) Color.White else scheme.muted
 
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = 50.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(bgColor)
+            .heightIn(min = 54.dp)
+            .clip(shape)
+            .background(gradientBrush)
+            .border(width = 1.dp, color = borderColor, shape = shape)
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 20.dp, vertical = 12.dp),
+            .padding(horizontal = 22.dp, vertical = 14.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
@@ -506,15 +623,16 @@ fun PrimaryButton(
             color = textColor,
             fontSize = (16f * scheme.fontScale).sp,
             fontWeight = FontWeight.Bold,
-            letterSpacing = 0.2.sp,
+            letterSpacing = 0.3.sp,
             textAlign = TextAlign.Center
         )
     }
 }
 
 /**
- * 1:1 with `NeonInput.jsx`:
- * borderRadius 14.dp, surface bg, 1.dp border, minHeight 48.dp, password eye toggle.
+ * 2026 iOS 18 Frosted Liquid Glass Capsule Input:
+ * `RoundedCornerShape(22.dp)`, `minHeight = 54.dp`, translucent glass fill (`Color.White.copy(alpha = 0.08f)`),
+ * specular gradient border (`1.dp`, brighter cyan/white when focused), optional leading icon, and password eye toggle.
  */
 @Composable
 fun NeonInput(
@@ -524,10 +642,12 @@ fun NeonInput(
     modifier: Modifier = Modifier,
     isPassword: Boolean = false,
     singleLine: Boolean = true,
+    leadingIcon: ImageVector? = null,
     keyboardType: KeyboardType = KeyboardType.Text
 ) {
     val scheme = LocalNeonScheme.current
     var passwordVisible by remember { mutableStateOf(false) }
+    var isFocused by remember { mutableStateOf(false) }
 
     val visualTransformation = if (isPassword && !passwordVisible) {
         PasswordVisualTransformation()
@@ -535,16 +655,50 @@ fun NeonInput(
         VisualTransformation.None
     }
 
+    val shape = RoundedCornerShape(22.dp)
+    val glassFill = if (scheme.isDark) {
+        Color.White.copy(alpha = 0.08f)
+    } else {
+        scheme.inputBg
+    }
+    val borderBrush = if (isFocused) {
+        Brush.linearGradient(
+            colors = listOf(
+                scheme.primary.copy(alpha = 0.90f),
+                Color.White.copy(alpha = 0.70f),
+                scheme.accent.copy(alpha = 0.75f)
+            )
+        )
+    } else {
+        Brush.linearGradient(
+            colors = listOf(
+                Color.White.copy(alpha = 0.36f),
+                scheme.primary.copy(alpha = 0.22f),
+                Color.White.copy(alpha = 0.10f)
+            )
+        )
+    }
+
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = 48.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(scheme.surface)
-            .border(1.dp, scheme.border, RoundedCornerShape(14.dp))
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .heightIn(min = 54.dp)
+            .clip(shape)
+            .background(scheme.inputBg)
+            .background(glassFill)
+            .border(width = 1.dp, brush = borderBrush, shape = shape)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        if (leadingIcon != null) {
+            Icon(
+                imageVector = leadingIcon,
+                contentDescription = null,
+                tint = if (isFocused) scheme.primary else scheme.muted,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+        }
         Box(
             modifier = Modifier.weight(1f),
             contentAlignment = Alignment.CenterStart
@@ -552,7 +706,7 @@ fun NeonInput(
             if (value.isEmpty()) {
                 Text(
                     text = placeholder,
-                    color = scheme.muted,
+                    color = scheme.muted.copy(alpha = 0.85f),
                     fontSize = (16f * scheme.fontScale).sp
                 )
             }
@@ -562,19 +716,22 @@ fun NeonInput(
                 singleLine = singleLine,
                 textStyle = TextStyle(
                     color = scheme.text,
-                    fontSize = (16f * scheme.fontScale).sp
+                    fontSize = (16f * scheme.fontScale).sp,
+                    fontWeight = FontWeight.Medium
                 ),
                 cursorBrush = SolidColor(scheme.primary),
                 visualTransformation = visualTransformation,
                 keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onFocusChanged { isFocused = it.isFocused }
             )
         }
         if (isPassword) {
             Spacer(modifier = Modifier.width(8.dp))
             Box(
                 modifier = Modifier
-                    .size(28.dp)
+                    .size(32.dp)
                     .clip(CircleShape)
                     .clickable { passwordVisible = !passwordVisible },
                 contentAlignment = Alignment.Center
@@ -582,8 +739,8 @@ fun NeonInput(
                 Icon(
                     imageVector = if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
                     contentDescription = "Toggle password visibility",
-                    tint = scheme.muted,
-                    modifier = Modifier.size(18.dp)
+                    tint = if (passwordVisible) scheme.primary else scheme.muted,
+                    modifier = Modifier.size(19.dp)
                 )
             }
         }
@@ -591,8 +748,9 @@ fun NeonInput(
 }
 
 /**
- * 1:1 with `PageScaffold.jsx`:
- * Top header with 29.sp bold centered title, left 40.dp slot with back chevron, right 40.dp slot, and AnimatedNeonBackground.
+ * 2026 iOS 18 Liquid Glass PageScaffold:
+ * Ultra-clean modern iOS 18 style header (`28.sp` ExtraBold title, frosted glass circular back button `40.dp`
+ * with `1.dp` glass border) over `AnimatedNeonBackground()`.
  */
 @Composable
 fun PageScaffold(
@@ -619,20 +777,36 @@ fun PageScaffold(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 60.dp)
+                    .heightIn(min = 64.dp)
                     .padding(horizontal = 20.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Box(
-                    modifier = Modifier.width(40.dp),
+                    modifier = Modifier.width(44.dp),
                     contentAlignment = Alignment.CenterStart
                 ) {
                     if (onBack != null) {
+                        val backGlassBrush = Brush.verticalGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = 0.16f),
+                                Color.White.copy(alpha = 0.06f)
+                            )
+                        )
+                        val backBorderBrush = Brush.linearGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = 0.45f),
+                                scheme.primary.copy(alpha = 0.28f),
+                                Color.White.copy(alpha = 0.12f)
+                            )
+                        )
                         Box(
                             modifier = Modifier
-                                .size(34.dp)
+                                .size(40.dp)
                                 .clip(CircleShape)
+                                .background(scheme.surface)
+                                .background(backGlassBrush)
+                                .border(width = 1.dp, brush = backBorderBrush, shape = CircleShape)
                                 .clickable(onClick = onBack),
                             contentAlignment = Alignment.Center
                         ) {
@@ -649,8 +823,9 @@ fun PageScaffold(
                 Text(
                     text = title,
                     color = scheme.text,
-                    fontSize = 29.sp,
-                    fontWeight = FontWeight.Bold,
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = (-0.3).sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center,
@@ -658,7 +833,7 @@ fun PageScaffold(
                 )
 
                 Box(
-                    modifier = Modifier.width(40.dp),
+                    modifier = Modifier.widthIn(min = 44.dp),
                     contentAlignment = Alignment.CenterEnd
                 ) {
                     rightContent?.invoke()
@@ -670,7 +845,7 @@ fun PageScaffold(
                     modifier = Modifier
                         .fillMaxSize()
                         .verticalScroll(rememberScrollState())
-                        .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 120.dp),
+                        .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 124.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     content = content
                 )
@@ -688,29 +863,45 @@ fun PageScaffold(
 }
 
 /**
- * 1:1 with `NeonAvatar` across `ChatsScreen.jsx` and `ListRow.jsx`:
- * Renders Saved bookmark gradient (`#2F80ED` -> `#56CCF2`), AI sparkles gradient, System shield gradient,
- * or Coil `AsyncImage` with initial letter fallback.
+ * 2026 iOS 18 Circular Glowing NeonAvatar:
+ * Renders a **Circular Avatar (`CircleShape`)** surrounded by a `1.8.dp` glowing gradient ring
+ * (`Brush.linearGradient(listOf(scheme.primary, scheme.accent))`), with inner avatar image (`AsyncImage`)
+ * or glowing gradient monogram!
  */
 @Composable
 fun NeonAvatar(
     avatarUrl: String? = null,
     label: String = "N",
-    sizeDp: Dp = 42.dp,
-    cornerRadiusDp: Dp = 14.dp,
+    sizeDp: Dp = 46.dp,
+    cornerRadiusDp: Dp = 23.dp,
     isSaved: Boolean = false,
     isAi: Boolean = false,
     isSystem: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val scheme = LocalNeonScheme.current
-    val shape = RoundedCornerShape(cornerRadiusDp)
     val initial = label.trim().take(1).uppercase().ifBlank { "N" }
+    val ringBrush = Brush.linearGradient(
+        colors = listOf(
+            scheme.primary,
+            scheme.accent,
+            Color.White.copy(alpha = 0.65f)
+        )
+    )
+    val monogramGradient = Brush.linearGradient(
+        colors = listOf(
+            scheme.accent.copy(alpha = 0.55f),
+            scheme.primary.copy(alpha = 0.35f)
+        )
+    )
 
     Box(
         modifier = modifier
             .size(sizeDp)
-            .clip(shape)
+            .clip(CircleShape)
+            .border(width = 1.8.dp, brush = ringBrush, shape = CircleShape)
+            .padding(2.2.dp)
+            .clip(CircleShape)
             .background(scheme.surfaceAlt),
         contentAlignment = Alignment.Center
     ) {
@@ -721,7 +912,7 @@ fun NeonAvatar(
                         .fillMaxSize()
                         .background(
                             Brush.linearGradient(
-                                colors = listOf(Color(0xFF2F80ED), Color(0xFF56CCF2))
+                                colors = listOf(Color(0xFF00E5FF), Color(0xFF6366F1))
                             )
                         ),
                     contentAlignment = Alignment.Center
@@ -773,34 +964,51 @@ fun NeonAvatar(
                 }
             }
             !avatarUrl.isNullOrBlank() -> {
-                Text(
-                    text = initial,
-                    color = scheme.text,
-                    fontSize = (sizeDp.value * 0.36f).sp,
-                    fontWeight = FontWeight.Bold
-                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(monogramGradient),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = initial,
+                        color = Color.White,
+                        fontSize = (sizeDp.value * 0.36f).sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                }
                 AsyncImage(
                     model = avatarUrl,
                     contentDescription = label,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(CircleShape)
                 )
             }
             else -> {
-                Text(
-                    text = initial,
-                    color = scheme.text,
-                    fontSize = (sizeDp.value * 0.36f).sp,
-                    fontWeight = FontWeight.Bold
-                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(monogramGradient),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = initial,
+                        color = Color.White,
+                        fontSize = (sizeDp.value * 0.36f).sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                }
             }
         }
     }
 }
 
 /**
- * 1:1 with `ListRow.jsx`:
- * minHeight 62.dp, borderRadius 14.dp, 42x42 squircle avatar with borderRadius 14.dp using `coil.compose.AsyncImage` + letter fallback.
+ * 2026 iOS 18 Frosted Liquid Glass Row:
+ * `RoundedCornerShape(24.dp)`, `minHeight = 72.dp`, `1.dp` specular glass gradient border,
+ * circular avatar with glowing cyan-violet ring (`NeonAvatar`), clean bold typography.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -818,7 +1026,28 @@ fun ListRow(
 ) {
     val scheme = LocalNeonScheme.current
     val hasAvatar = !avatarUrl.isNullOrBlank() || !avatarLabel.isNullOrBlank()
-    val shape = RoundedCornerShape(14.dp)
+    val shape = RoundedCornerShape(24.dp)
+
+    val glassOverlay = Brush.verticalGradient(
+        colors = listOf(
+            Color.White.copy(alpha = 0.13f),
+            Color.White.copy(alpha = 0.04f)
+        )
+    )
+    val borderBrush = Brush.linearGradient(
+        colors = if (danger) {
+            listOf(
+                scheme.danger.copy(alpha = 0.55f),
+                Color.White.copy(alpha = 0.18f)
+            )
+        } else {
+            listOf(
+                Color.White.copy(alpha = 0.38f),
+                scheme.primary.copy(alpha = 0.22f),
+                Color.White.copy(alpha = 0.08f)
+            )
+        }
+    )
 
     val clickMod = if (onClick != null || onLongClick != null) {
         Modifier.combinedClickable(
@@ -832,21 +1061,21 @@ fun ListRow(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = 62.dp)
+            .heightIn(min = 72.dp)
             .clip(shape)
             .background(scheme.surface)
-            .border(1.dp, scheme.border, shape)
+            .background(glassOverlay)
+            .border(width = 1.dp, brush = borderBrush, shape = shape)
             .then(clickMod)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+        horizontalArrangement = Arrangement.spacedBy(13.dp)
     ) {
         if (hasAvatar) {
             NeonAvatar(
                 avatarUrl = avatarUrl,
                 label = avatarLabel?.ifBlank { title } ?: title,
-                sizeDp = 42.dp,
-                cornerRadiusDp = 14.dp
+                sizeDp = 46.dp
             )
         }
 
@@ -858,7 +1087,7 @@ fun ListRow(
                 text = title,
                 color = if (danger) scheme.danger else scheme.text,
                 fontSize = (16f * scheme.fontScale).sp,
-                fontWeight = FontWeight.SemiBold,
+                fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -880,8 +1109,8 @@ fun ListRow(
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                     contentDescription = null,
-                    tint = scheme.muted,
-                    modifier = Modifier.size(18.dp)
+                    tint = scheme.muted.copy(alpha = 0.85f),
+                    modifier = Modifier.size(20.dp)
                 )
             }
         }
@@ -889,8 +1118,8 @@ fun ListRow(
 }
 
 /**
- * 1:1 with `LanguageSwitcher.jsx`:
- * `RU` | `KY` | `EN` pill switcher (`borderRadius = 12.dp`, item `minWidth = 44.dp`, `minHeight = 34.dp`, `borderRadius = 10.dp`).
+ * 2026 iOS 18 Liquid Glass Pill LanguageSwitcher:
+ * `RU` | `KY` | `EN` pill switcher (`RoundedCornerShape(18.dp)`, frosted glass border + active aurora capsule).
  */
 @Composable
 fun LanguageSwitcher(
@@ -901,33 +1130,61 @@ fun LanguageSwitcher(
     val scheme = LocalNeonScheme.current
     val options = listOf("ru", "ky", "en")
     val activeLang = currentLang.lowercase().ifBlank { "ru" }
+    val outerShape = RoundedCornerShape(18.dp)
+    val borderBrush = Brush.linearGradient(
+        colors = listOf(
+            Color.White.copy(alpha = 0.36f),
+            scheme.primary.copy(alpha = 0.22f)
+        )
+    )
 
     Row(
         modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
+            .clip(outerShape)
             .background(scheme.surface)
+            .background(Color.White.copy(alpha = 0.06f))
+            .border(width = 1.dp, brush = borderBrush, shape = outerShape)
             .padding(4.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         options.forEach { code ->
             val isActive = activeLang == code
+            val pillShape = RoundedCornerShape(14.dp)
+            val activeBrush = Brush.horizontalGradient(
+                colors = listOf(
+                    scheme.primary.copy(alpha = 0.35f),
+                    scheme.accent.copy(alpha = 0.45f)
+                )
+            )
             Box(
                 modifier = Modifier
                     .widthIn(min = 44.dp)
                     .heightIn(min = 34.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(if (isActive) scheme.surfaceAlt else Color.Transparent)
+                    .clip(pillShape)
+                    .then(
+                        if (isActive) {
+                            Modifier
+                                .background(activeBrush)
+                                .border(
+                                    width = 1.dp,
+                                    color = Color.White.copy(alpha = 0.35f),
+                                    shape = pillShape
+                                )
+                        } else {
+                            Modifier
+                        }
+                    )
                     .clickable { onSelectLang(code) }
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = code.uppercase(),
                     color = if (isActive) scheme.text else scheme.muted,
                     fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.4.sp
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 0.5.sp
                 )
             }
         }

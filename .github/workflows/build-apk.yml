@@ -32,6 +32,12 @@ jobs:
           gradle-version: '8.14.3'
           cache-read-only: false
 
+      - name: 🔑 Cache persistent Android Debug Keystore
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: neongram-kotlin-debug-keystore-v1
+
       - name: 🛠️ Build Debug APK (arm64-v8a)
         run: gradle assembleDebug --stacktrace --no-daemon
 

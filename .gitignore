@@ -1,0 +1,22 @@
+# Gradle & Android build artifacts
+.gradle/
+build/
+app/build/
+local.properties
+*.iml
+.idea/
+.kotlin/
+
+# Secrets & Keys (Never commit private keys or env files)
+*.key
+*.pem
+*.p12
+*.jks
+*.keystore
+.env
+.env.*
+
+# APK binaries
+*.apk
+*.aab
+build-artifacts/

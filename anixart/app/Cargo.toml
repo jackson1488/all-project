@@ -10,7 +10,7 @@ anixart-parsers = { path = "../parsers" }
 # which fixes the `wl_surface has no event 2` crash of iced 0.4 on Fedora Wayland.
 # The `tokio` feature is mandatory: without an async feature iced falls back to the
 # "null" backend that silently drops every Task, so reqwest calls would never run.
-iced = { version = "0.13", features = ["tokio"] }
+iced = { version = "0.13", features = ["tokio", "wayland", "x11"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 
 [lib]

@@ -1,11 +1,10 @@
-use iced::{button, scrollable, Button, Column, Element, Length, Radio, Scrollable, Text};
+use iced::{button, scrollable, Button, Column, Element, Length, Scrollable, Text};
 
 use anixart_core::FeedItem;
 
 #[derive(Debug, Clone)]
 pub enum Message {
     FeedPage(usize),
-    FeedItemSelected(FeedItem),
 }
 
 pub struct FeedScreen {
@@ -30,8 +29,8 @@ impl FeedScreen {
     }
 
     pub fn view(&mut self) -> Element<'_, Message> {
-        let mut col = Column::new()
-            .push(Text::new(format!("Feed — page {}", self.page)).size(20));
+        let page = self.page;
+        let mut col = Column::new().push(Text::new(format!("Feed — page {page}")).size(20));
 
         if let Some(err) = &self.error {
             col = col.push(Text::new(err).color([1.0, 0.0, 0.0]));
@@ -43,10 +42,9 @@ impl FeedScreen {
 
         for item in &self.items {
             let title = item.title.as_deref().unwrap_or("(no title)");
-            let label = format!(
-                "[{}] {} (votes: {})",
-                item.creation_date, title, item.vote_count
-            );
+            let created = &item.creation_date;
+            let votes = item.vote_count;
+            let label = format!("[{created}] {title} (votes: {votes})");
             col = col.push(Text::new(label).size(14));
         }
 

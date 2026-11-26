@@ -71,7 +71,8 @@ impl SearchScreen {
         for (i, rel) in self.results.iter().enumerate() {
             let title = rel.title_ru.as_deref().unwrap_or("(no title)");
             let year = rel.year.as_deref().unwrap_or("?");
-            let label = format!("[{i}] {title} ({year}) — {:.1}", rel.grade);
+            let grade = rel.grade;
+            let label = format!("[{i}] {title} ({year}) — {grade:.1}");
             col = col.push(Text::new(label).size(14));
         }
 

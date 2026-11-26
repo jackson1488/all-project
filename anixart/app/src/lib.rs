@@ -34,6 +34,7 @@ mod tests {
     fn screen_equality() {
         assert_eq!(Screen::Login, Screen::Login);
         assert_ne!(Screen::Feed, Screen::Search);
+        assert_ne!(Screen::Release, Screen::Search);
     }
 
     // ── EpisodeInfo message test ────────────────────────────────────────────
@@ -65,6 +66,9 @@ mod tests {
         let m1 = Msg::Back;
         let m2 = m1.clone();
         assert!(matches!(m2, Msg::Back));
+
+        let noop = Msg::Noop;
+        assert!(matches!(noop, Msg::Noop));
     }
 
     // ── Error state tests ───────────────────────────────────────────────────
@@ -100,12 +104,13 @@ mod tests {
     fn logout_clears_state() {
         let mut stack = vec![Screen::Login, Screen::Feed, Screen::Search];
         let mut screen = Screen::Search;
+        assert_eq!(screen, Screen::Search);
 
         // Logout
         screen = Screen::Login;
         stack.clear();
 
-        assert_eq!(stack.len(), 0);
+        assert!(stack.is_empty());
         assert_eq!(screen, Screen::Login);
     }
 
@@ -119,13 +124,14 @@ mod tests {
         if current != Screen::Feed {
             stack.push(current);
         }
-        assert_eq!(stack.len(), 0);
+        assert!(stack.is_empty());
 
         // Navigate to different screen
         if current != Screen::Search {
             stack.push(current);
         }
         current = Screen::Search;
+        assert_eq!(current, Screen::Search);
         assert_eq!(stack.len(), 1);
         assert_eq!(stack[0], Screen::Feed);
     }
@@ -138,6 +144,10 @@ mod tests {
         let mut selected_source_idx: Option<usize> = Some(0);
         let mut sources = vec!["src1", "src2"];
         let mut episodes = vec!["ep1", "ep2"];
+
+        // Initial state
+        assert!(selected_type_idx.is_none());
+        assert_eq!(selected_source_idx, Some(0));
 
         // Select a type
         selected_type_idx = Some(0);
@@ -171,16 +181,22 @@ mod tests {
         let mapped = ok.map(|t| format!("got: {t}"));
         assert_eq!(mapped.as_deref(), Ok("got: token_abc"));
 
-        let err: Result<String, String> = Err("failed".into());
+        fn failing() -> Result<String, String> {
+            Err("failed".into())
+        }
+        let err = failing();
         assert!(err.is_err());
-        assert_eq!(err.unwrap_err(), "failed");
+        match err {
+            Err(e) => assert_eq!(e, "failed"),
+            Ok(_) => panic!("expected Err"),
+        }
     }
 
     // ── Best URL selection mimics ParsedVideo logic ─────────────────────────
 
     #[test]
     fn best_url_selection() {
-        let qualities = vec![
+        let qualities = [
             ("480p", "url_480"),
             ("720p", "url_720"),
             ("1080p", "url_1080"),

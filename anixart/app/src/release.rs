@@ -4,10 +4,6 @@ use anixart_core::{Episode, EpisodeType, Release, Source};
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    SelectType(usize),
-    SelectSource(usize),
-    SelectEpisode(usize),
-    PlayEpisode(Episode),
     TypeIdx(String),
     SourceIdx(String),
     EpisodeIdx(String),
@@ -15,7 +11,6 @@ pub enum Message {
     OpenSource,
     OpenEpisode,
     BackToRelease,
-    BackToTypes,
     BackToSources,
 }
 
@@ -79,16 +74,14 @@ impl ReleaseScreen {
             let title_ru = rel.title_ru.as_deref().unwrap_or("(no ru title)");
             let title_orig = rel.title_original.as_deref().unwrap_or("");
             let desc = rel.description.as_deref().unwrap_or("(no description)");
+            let grade = rel.grade;
+            let year = rel.year.as_deref().unwrap_or("?");
+            let age = rel.age_rating;
 
             col = col
                 .push(Text::new(title_ru).size(22))
                 .push(Text::new(title_orig).size(16).color([0.5, 0.5, 0.5]))
-                .push(Text::new(format!(
-                    "Rating: {} | Year: {} | Age: {}",
-                    rel.grade,
-                    rel.year.as_deref().unwrap_or("?"),
-                    rel.age_rating
-                )))
+                .push(Text::new(format!("Rating: {grade} | Year: {year} | Age: {age}")))
                 .push(Text::new(desc).size(13));
 
             if let Some(err) = &self.error {
@@ -100,7 +93,10 @@ impl ReleaseScreen {
                 col = col.push(Text::new("— Voiceovers —").size(16));
                 for (i, t) in self.types.iter().enumerate() {
                     let marker = if self.selected_type_idx == Some(i) { " ✓" } else { "" };
-                    let label = format!("[{i}] {}{} ({} ep, sub: {})", t.name, marker, t.episodes_count, t.is_sub);
+                    let name = &t.name;
+                    let count = t.episodes_count;
+                    let sub = t.is_sub;
+                    let label = format!("[{i}] {name}{marker} ({count} ep, sub: {sub})");
                     col = col.push(Text::new(label).size(13));
                 }
                 let row = Row::new()
@@ -128,7 +124,9 @@ impl ReleaseScreen {
                 col = col.push(Text::new("—— Sources ——").size(16));
                 for (i, s) in self.sources.iter().enumerate() {
                     let marker = if self.selected_source_idx == Some(i) { " ✓" } else { "" };
-                    let label = format!("[{i}] {}{} ({} ep)", s.name, marker, s.episodes_count);
+                    let name = &s.name;
+                    let count = s.episodes_count;
+                    let label = format!("[{i}] {name}{marker} ({count} ep)");
                     col = col.push(Text::new(label).size(13));
                 }
                 let row = Row::new()
@@ -155,7 +153,8 @@ impl ReleaseScreen {
             if self.selected_source_idx.is_some() && !self.episodes.is_empty() {
                 col = col.push(Text::new("——— Episodes ———").size(16));
                 for (i, ep) in self.episodes.iter().enumerate() {
-                    let default_name = format!("Ep #{}", ep.position);
+                    let position = ep.position;
+                    let default_name = format!("Ep #{position}");
                     let ep_name = ep.name.as_deref().unwrap_or(&default_name);
                     let watched = if ep.is_watched { " ✓" } else { "" };
                     let label = format!("[{i}] {ep_name}{watched}");

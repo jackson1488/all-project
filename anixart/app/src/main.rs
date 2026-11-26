@@ -68,19 +68,12 @@ pub enum Message {
     EpisodesFail(String),
     PlaybackOk(ParsedVideo),
     PlaybackFail(String),
-
-    Noop,
 }
 
 use anixart_core::{
     AnixartClient, Episode, EpisodeType, FeedItem, Release, ReleaseSearchResponse, Source,
 };
 use anixart_parsers::ParsedVideo;
-
-#[derive(Debug, Clone)]
-pub struct EpisodeInfo {
-    pub url: String,
-}
 
 // ── Async helpers ───────────────────────────────────────────────────────────
 
@@ -275,6 +268,19 @@ impl Application for AnixartApp {
                 self.search_screen.selected_idx_str = v;
                 Command::none()
             }
+            Message::SearchPage(page) => {
+                self.search_screen.page = page;
+                let q = self.search_screen.query.clone();
+                if q.trim().is_empty() {
+                    return Command::none();
+                }
+                self.search_screen.loading = true;
+                let c = self.client.clone();
+                Command::perform(search_for(c, q, page), |r| match r {
+                    Ok(resp) => Message::SearchOk(resp),
+                    Err(e) => Message::SearchFail(e),
+                })
+            }
             Message::SearchOpenResult => {
                 let idx: usize = self.search_screen.selected_idx_str.parse().unwrap_or(999);
                 if idx < self.search_screen.results.len() {
@@ -394,19 +400,12 @@ impl Application for AnixartApp {
             }
 
             // ── Playback ───────────────────────────────────────────────────
-            Message::Play(ep_info) => {
-                let http = self.http.clone();
-                Command::perform(resolve_video_url(http, ep_info.url), |r| match r {
-                    Ok(pv) => Message::PlaybackOk(pv),
-                    Err(e) => Message::PlaybackFail(e),
-                })
-            }
             Message::PlaybackOk(pv) => {
                 if let Some(url) = pv.best_url() {
                     let mut cmd = ProcessCommand::new("mpv");
                     cmd.arg(url);
                     for (k, v) in &pv.headers {
-                        cmd.arg(format!("--http-header-fields={}: {}", k, v));
+                        cmd.arg(format!("--http-header-fields={k}: {v}"));
                     }
                     match cmd.spawn() {
                         Ok(_) => println!("mpv spawned"),
@@ -433,10 +432,6 @@ impl Application for AnixartApp {
                 self.release_screen.episodes.clear();
                 Command::none()
             }
-
-            Message::Noop => Command::none(),
-            Message::SearchOpenResult => Command::none(), // handled above
-            Message::SearchSelectIdx(_) => Command::none(),
 
             // Release text input handlers
             Message::TypeIdxStr(v) => { self.release_screen.type_idx_str = v; Command::none() }
@@ -506,22 +501,15 @@ impl Application for AnixartApp {
             }),
             Screen::Feed => self.feed_screen.view().map(|m| match m {
                 feed::Message::FeedPage(p) => Message::FeedPage(p),
-                feed::Message::FeedItemSelected(_) => Message::Noop,
             }),
             Screen::Search => self.search_screen.view().map(|m| match m {
                 search::Message::QueryChanged(v) => Message::SearchQuery(v),
                 search::Message::Search => Message::SearchGo,
-                search::Message::SetPage(_) => Message::Noop,
+                search::Message::SetPage(p) => Message::SearchPage(p),
                 search::Message::SelectResultIdx(v) => Message::SearchSelectIdx(v),
                 search::Message::OpenResult => Message::SearchOpenResult,
             }),
             Screen::Release => self.release_screen.view().map(|m| match m {
-                release::Message::SelectType(i) => Message::TypeSelected(i),
-                release::Message::SelectSource(i) => Message::SourceSelected(i),
-                release::Message::SelectEpisode(i) => Message::EpisodeSelected(i),
-                release::Message::PlayEpisode(ep) => {
-                    Message::Play(EpisodeInfo { url: ep.url })
-                }
                 release::Message::TypeIdx(v) => Message::TypeIdxStr(v),
                 release::Message::SourceIdx(v) => Message::SourceIdxStr(v),
                 release::Message::EpisodeIdx(v) => Message::EpisodeIdxStr(v),
@@ -529,7 +517,6 @@ impl Application for AnixartApp {
                 release::Message::OpenSource => Message::OpenSource,
                 release::Message::OpenEpisode => Message::OpenEpisode,
                 release::Message::BackToRelease => Message::BackToRelease,
-                release::Message::BackToTypes => Message::BackToTypes,
                 release::Message::BackToSources => Message::BackToTypes,
             }),
         };

@@ -1,4 +1,4 @@
-name: Anixart Rust (Linux)
+name: Anixart Rust CI (Linux + Windows)
 
 on:
   push:
@@ -35,4 +35,38 @@ jobs:
             anixart/target/release/anixart
             !anixart/target/release/*.d
             !anixart/target/release/*.rlib
+          if-no-files-found: ignore
+
+  # Experimental Windows parity check. The app spawns an external `mpv` process
+  # instead of linking libmpv, so no C deps are needed here — only the MSVC
+  # toolchain. `continue-on-error` keeps this informational: it reports Windows
+  # portability status without ever gating the run. Promote it to a blocking
+  # gate once every step is green (see the Windows roadmap in anixart/README.md).
+  windows:
+    name: Windows (experimental)
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: anixart
+      # Advisory only on purpose: no `-D warnings`, so pre-existing platform
+      # lints are reported as warnings instead of failing the parity probe.
+      - name: Clippy (advisory)
+        run: cargo clippy --workspace --all-targets
+      - run: cargo test --workspace
+      - run: cargo build --workspace --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: anixart-windows
+          path: |
+            anixart/target/release/anixart.exe
+            !anixart/target/release/*.d
+            !anixart/target/release/*.lib
+            !anixart/target/release/*.pdb
           if-no-files-found: ignore

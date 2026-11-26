@@ -1,7 +1,4 @@
-use iced::{
-    button, text_input, Button, Column, Container, Element, Length, Text,
-    TextInput,
-};
+use iced::{button, text_input, Button, Column, Container, Element, Length, Text, TextInput};
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -11,11 +8,13 @@ pub enum Message {
 }
 
 pub struct LoginForm {
-    username: String,
-    password: String,
+    pub username: String,
+    pub password: String,
     username_state: text_input::State,
     password_state: text_input::State,
     login_state: button::State,
+    pub error: Option<String>,
+    pub loading: bool,
 }
 
 impl LoginForm {
@@ -45,15 +44,25 @@ impl LoginForm {
             Message::PasswordChanged,
         )
         .password();
-        let login = Button::new(&mut self.login_state, Text::new("Login"))
-            .on_press(Message::Login);
 
-        let content = Column::new()
+        let login_btn = if self.loading {
+            Button::new(&mut self.login_state, Text::new("Logging in..."))
+        } else {
+            Button::new(&mut self.login_state, Text::new("Login"))
+                .on_press(Message::Login)
+        };
+
+        let mut content = Column::new()
             .push(Text::new("Username:"))
             .push(username)
             .push(Text::new("Password:"))
-            .push(password)
-            .push(login);
+            .push(password);
+
+        if let Some(err) = &self.error {
+            content = content.push(Text::new(err).color([1.0, 0.0, 0.0]));
+        }
+
+        content = content.push(login_btn);
 
         Container::new(content)
             .width(Length::Fill)
@@ -72,6 +81,8 @@ impl Default for LoginForm {
             username_state: text_input::State::new(),
             password_state: text_input::State::new(),
             login_state: button::State::new(),
+            error: None,
+            loading: false,
         }
     }
 }

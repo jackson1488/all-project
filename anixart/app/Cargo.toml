@@ -7,6 +7,11 @@ edition = "2021"
 anixart-core = { path = "../core" }
 anixart-parsers = { path = "../parsers" }
 iced = { version = "0.4", features = ["default"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+
+[lib]
+name = "anixart_app"
+path = "src/lib.rs"
 
 [[bin]]
 name = "anixart"

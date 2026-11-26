@@ -255,8 +255,8 @@ async fn telegram_token_exchange_uses_the_documented_body() {
 #[tokio::test]
 async fn telegram_token_exchange_errors_become_oauth_errors() {
     let mock = MockServer::spawn("400 Bad Request", r#"{"error":"invalid_grant"}"#);
-    let client = client(&mock);
-    let err = client
+    let c1 = client(&mock);
+    let err = c1
         .exchange_telegram_code_at(&mock.base, "c", "v")
         .await
         .expect_err("must fail");

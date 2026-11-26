@@ -34,8 +34,9 @@ pub fn date_label(timestamp: i64) -> String {
 
 /// Russian plural form of a count: `1 эпизод`, `3 эпизода`, `7 эпизодов`.
 pub fn plural<'a>(count: i64, one: &'a str, few: &'a str, many: &'a str) -> &'a str {
-    let last = count.rem_euclid(10);
-    let last_two = count.rem_euclid(100);
+    let abs = count.unsigned_abs();
+    let last = abs % 10;
+    let last_two = abs % 100;
     if last == 1 && last_two != 11 {
         one
     } else if (2..=4).contains(&last) && !(12..=14).contains(&last_two) {

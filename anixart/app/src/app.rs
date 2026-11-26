@@ -1842,8 +1842,8 @@ mod tests {
         assert!(app.bookmarks.collections.is_empty());
         assert!(!app.bookmarks.loading);
 
-        let _ = app.update(Message::BookmarkLoaded(Ok(BookmarkPage::Releases(releases(
-            &[1, 2, 3],
+        let _ = app.update(Message::BookmarkLoaded(Ok(BookmarkPage::Releases(
+            releases(&[1, 2, 3]),
         ))));
         assert_eq!(app.bookmarks.releases.len(), 3);
         assert_eq!(app.bookmarks.page, 1);

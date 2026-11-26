@@ -7,3 +7,7 @@ edition = "2021"
 anixart-core = { path = "../anixart-core" }
 parsers = { path = "../parsers" }
 iced = { version = "0.4", features = ["default"] }
+
+[[bin]]
+name = "anixart"
+path = "src/main.rs"

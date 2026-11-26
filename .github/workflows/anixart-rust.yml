@@ -1,28 +1,38 @@
-name: Anixart Rust CI
+name: Anixart Rust (Linux)
 
 on:
   push:
     branches: [ main ]
-  pull_request:
-    branches: [ main ]
+    paths: [ "anixart/**", ".github/workflows/anixart-rust.yml" ]
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: anixart
 
 jobs:
-  build:
+  linux:
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v2
-    - name: Install mpv
-      run: sudo apt-get update && sudo apt-get install -y mpv
-    - name: Build
-      run: |
-        cd anixart
-        cargo build --verbose
-    - name: Run tests
-      run: |
-        cd anixart
-        cargo test --verbose
-    - name: Clippy
-      run: |
-        cd anixart
-        cargo clippy -- -D warnings
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev mpv
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: anixart
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - run: cargo build --workspace --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: anixart-linux
+          path: |
+            anixart/target/release/anixart
+            !anixart/target/release/*.d
+            !anixart/target/release/*.rlib
+          if-no-files-found: ignore

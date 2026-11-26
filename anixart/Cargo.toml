@@ -1,24 +1,12 @@
-[package]
-name = "anixart"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-anixart-core = { path = "../anixart-core" }
-parsers = { path = "../parsers" }
-iced = { version = "0.4", features = ["default"] }
-
-[profile.dev]
-panic = "abort"
+[workspace]
+resolver = "2"
+members = [
+  "core",
+  "parsers",
+  "app",
+]
 
 [profile.release]
 opt-level = 3
 panic = "abort"
 debug-assertions = false
-
-[workspace]
-members = [
-  "anixart",
-  "anixart-core",
-  "parsers",
-]

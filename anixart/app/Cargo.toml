@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-anixart-core = { path = "../anixart-core" }
-parsers = { path = "../parsers" }
+anixart-core = { path = "../core" }
+anixart-parsers = { path = "../parsers" }
 iced = { version = "0.4", features = ["default"] }
 
 [[bin]]

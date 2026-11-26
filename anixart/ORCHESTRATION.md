@@ -2,6 +2,12 @@
 
 Orchestrator (Antigravity) writes specs; OpenCode agents write code; heavy work runs in GitHub Actions only.
 
+## Layout
+
+`anixart/` is a Cargo workspace: `core` (lib `anixart-core`, API client),
+`parsers` (lib `anixart-parsers`, video links), `app` (bin `anixart`, iced UI +
+mpv). CI builds the workspace from `anixart/`.
+
 ## Model split (OpenCode)
 - Free pool (`OpenCode` provider): boilerplate, parsers, tests, docs.
 - `lishko` pool: harder code (API client, player/UI glue).

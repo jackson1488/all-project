@@ -69,7 +69,7 @@ impl<'de> Deserialize<'de> for WatchStatus {
 }
 
 /// Body of `POST /filter/{page}`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct FilterRequest {
     /// 0 = new update descending, 1 = grade desc, 2 = year desc, 3 = popular desc,
     /// 4 = date update asc, 5 = grade asc, 6 = year asc, 7 = popular asc.
@@ -135,28 +135,3 @@ pub struct FilterRequest {
     pub is_genres_exclude_mode_enabled: bool,
 }
 
-impl Default for FilterRequest {
-    fn default() -> Self {
-        Self {
-            sort: 0,
-            category_id: None,
-            status_id: None,
-            start_year: None,
-            end_year: None,
-            country: None,
-            studio: None,
-            source: None,
-            season: None,
-            genres_mode: None,
-            episodes_from: None,
-            episodes_to: None,
-            episode_duration_from: None,
-            episode_duration_to: None,
-            genres: Vec::new(),
-            profile_list_exclusions: Vec::new(),
-            types: Vec::new(),
-            age_ratings: Vec::new(),
-            is_genres_exclude_mode_enabled: false,
-        }
-    }
-}

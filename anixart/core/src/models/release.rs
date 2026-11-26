@@ -13,7 +13,7 @@ pub struct Release {
     pub title_alt: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
-    #[serde(default)]
+    #[serde(default, alias = "poster")]
     pub image: Option<String>,
     #[serde(default)]
     pub year: Option<String>,
@@ -63,6 +63,8 @@ pub struct Release {
     pub profile_list_status: i32,
     #[serde(default)]
     pub release_date: Option<String>,
+    #[serde(default)]
+    pub status: Option<String>,
 }
 
 /// `GET /release/{id}` envelope.

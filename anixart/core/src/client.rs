@@ -6,9 +6,10 @@ use serde::de::DeserializeOwned;
 
 use crate::error::{AnixartError, Result};
 use crate::models::{
-    CodeResponse, CollectionResponse, EpisodeResponse, FeedItem, Pageable, ProfileInfoResponse,
-    ProfileResponse, Release, ReleaseResponse, ReleaseSearchResponse, SearchRequest, SignInResponse,
-    SocialSignInResponse, SourcesResponse, TypesResponse,
+    CodeResponse, Collection, CollectionResponse, EpisodeResponse, FeedItem, FilterRequest,
+    Pageable, ProfileInfoResponse, ProfileResponse, Release, ReleaseResponse,
+    ReleaseSearchResponse, SearchRequest, SignInResponse, SocialSignInResponse, SourcesResponse,
+    TypesResponse, WatchStatus,
 };
 use crate::oauth::{self, SocialProvider, TelegramPkce};
 use crate::API_BASE_URL;
@@ -540,6 +541,135 @@ impl AnixartClient {
     /// `GET /collection/{id}`.
     pub async fn collection(&self, id: i64) -> Result<CollectionResponse> {
         self.get_json(&format!("collection/{id}"), &[]).await
+    }
+
+    /// `GET /profile/list/add/{status}/{r_id}` — adds a release to a watch list.
+    pub async fn set_watch_status(
+        &self,
+        status: WatchStatus,
+        release_id: i64,
+    ) -> Result<CodeResponse> {
+        self.require_token()?;
+        self.get_json(
+            &format!("profile/list/add/{}/{}", status.as_i32(), release_id),
+            &[],
+        )
+        .await
+    }
+
+    /// `GET /profile/list/delete/{status}/{r_id}` — removes a release from a watch list.
+    pub async fn remove_watch_status(
+        &self,
+        status: WatchStatus,
+        release_id: i64,
+    ) -> Result<CodeResponse> {
+        self.require_token()?;
+        self.get_json(
+            &format!("profile/list/delete/{}/{}", status.as_i32(), release_id),
+            &[],
+        )
+        .await
+    }
+
+    /// `GET /profile/list/all/{status}/{page}` — paginated watch list.
+    pub async fn watch_list(
+        &self,
+        status: WatchStatus,
+        page: u32,
+        sort: Option<i32>,
+        filter_announce: Option<i32>,
+    ) -> Result<Pageable<Release>> {
+        self.require_token()?;
+        let mut extra: Vec<(&str, String)> = Vec::new();
+        if let Some(s) = sort {
+            extra.push(("sort", s.to_string()));
+        }
+        if let Some(f) = filter_announce {
+            extra.push(("filter_announce", f.to_string()));
+        }
+        self.get_json(&format!("profile/list/all/{}/{}", status.as_i32(), page), &extra)
+            .await
+    }
+
+    /// `GET /profile/list/all/{p_id}/{status}/{page}` — another user's watch list.
+    pub async fn watch_list_by_profile(
+        &self,
+        profile_id: i64,
+        status: WatchStatus,
+        page: u32,
+        sort: Option<i32>,
+        filter_announce: Option<i32>,
+    ) -> Result<Pageable<Release>> {
+        let mut extra: Vec<(&str, String)> = Vec::new();
+        if let Some(s) = sort {
+            extra.push(("sort", s.to_string()));
+        }
+        if let Some(f) = filter_announce {
+            extra.push(("filter_announce", f.to_string()));
+        }
+        self.get_json(
+            &format!("profile/list/all/{profile_id}/{}/{}", status.as_i32(), page),
+            &extra,
+        )
+        .await
+    }
+
+    /// `GET /collection/all/{page}` — paginated collections feed.
+    pub async fn collections(
+        &self,
+        page: u32,
+        previous_page: i32,
+        r#where: i32,
+        sort: i32,
+    ) -> Result<Pageable<Collection>> {
+        let prev = previous_page.to_string();
+        let w = r#where.to_string();
+        let s = sort.to_string();
+        self.get_json(
+            &format!("collection/all/{page}"),
+            &[("previous_page", prev), ("where", w), ("sort", s)],
+        )
+        .await
+    }
+
+    /// `GET /collectionFavorite/all/{page}` — favorite collections.
+    pub async fn favorite_collections(&self, page: u32) -> Result<Pageable<Collection>> {
+        self.require_token()?;
+        self.get_json(&format!("collectionFavorite/all/{page}"), &[])
+            .await
+    }
+
+    /// `POST /filter/{page}` — catalogue filter/search.
+    pub async fn filter_releases(
+        &self,
+        page: u32,
+        filter: &FilterRequest,
+        extended_mode: Option<bool>,
+    ) -> Result<Pageable<Release>> {
+        let extra: Vec<(&str, String)> = match extended_mode {
+            Some(v) => vec![("extended_mode", v.to_string())],
+            None => Vec::new(),
+        };
+        let url = self.build_url(&format!("filter/{page}"), &extra)?;
+        let resp = self.http.post(url).json(filter).send().await?.error_for_status()?;
+        let text = resp.text().await?;
+        Ok(serde_json::from_str(&text)?)
+    }
+
+    /// `POST /discover/interesting` — editorial / algorithmic discovery feed.
+    pub async fn discover_interesting(&self) -> Result<Pageable<Release>> {
+        let url = self.build_url("discover/interesting", &[])?;
+        let resp = self.http.post(url).send().await?.error_for_status()?;
+        let text = resp.text().await?;
+        Ok(serde_json::from_str(&text)?)
+    }
+
+    /// `POST /discover/comments` — most commented / discussed releases.
+    pub async fn discover_comments(&self) -> Result<Pageable<Release>> {
+        let url = self.build_url("discover/comments", &[])?;
+        let resp = self.http.post(url).send().await?.error_for_status()?;
+        let text = resp.text().await?;
+        Ok(serde_json::from_str(&text)?)
     }
 }
 

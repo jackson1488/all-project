@@ -5,6 +5,7 @@ pub mod collection;
 pub mod common;
 pub mod episode;
 pub mod feed;
+pub mod filter;
 pub mod profile;
 pub mod release;
 
@@ -15,5 +16,6 @@ pub use episode::{
     Episode, EpisodeResponse, EpisodeType, Source, SourcesResponse, TypesResponse, Voiceover,
 };
 pub use feed::{FeedChannel, FeedItem};
+pub use filter::{FilterRequest, WatchStatus};
 pub use profile::{Profile, ProfileInfoResponse, ProfileResponse};
 pub use release::{Related, Release, ReleaseResponse, ReleaseSearchResponse, SearchRequest};

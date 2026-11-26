@@ -1,0 +1,34 @@
+{
+  "code": 0,
+  "content": [
+    {
+      "id": 1001,
+      "title_ru": "Клинок, рассекающий демонов",
+      "title_original": "Kimetsu no Yaiba",
+      "image": "https://cdn.example/r1001.jpg",
+      "grade": 4.7,
+      "episodes_released": 26,
+      "episodes_total": 26,
+      "profile_list_status": 1,
+      "status_id": 1,
+      "year": "2019",
+      "country": "JP",
+      "status": "Ongoing",
+      "favorites_count": 9000,
+      "age_rating": 16,
+      "genres": "Action, Fantasy",
+      "studio": "ufotable"
+    },
+    {
+      "id": 1002,
+      "title_ru": "Атака титанов",
+      "title_original": "Shingeki no Kyojin",
+      "grade": 4.8,
+      "profile_list_status": 0,
+      "status_id": 2
+    }
+  ],
+  "current_page": 0,
+  "total_count": 2,
+  "total_page_count": 1
+}

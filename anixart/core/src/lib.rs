@@ -44,4 +44,31 @@ mod tests {
             Err(AnixartError::MissingToken)
         ));
     }
+
+    #[tokio::test]
+    async fn watch_list_operations_require_token() {
+        let client = AnixartClient::with_base_url("https://example.test/").unwrap();
+        let status = WatchStatus::Watching;
+        assert!(matches!(
+            client.set_watch_status(status, 1).await,
+            Err(AnixartError::MissingToken)
+        ));
+        assert!(matches!(
+            client.remove_watch_status(status, 1).await,
+            Err(AnixartError::MissingToken)
+        ));
+        assert!(matches!(
+            client.watch_list(status, 0, None, None).await,
+            Err(AnixartError::MissingToken)
+        ));
+    }
+
+    #[tokio::test]
+    async fn favorite_collections_require_token() {
+        let client = AnixartClient::with_base_url("https://example.test/").unwrap();
+        assert!(matches!(
+            client.favorite_collections(0).await,
+            Err(AnixartError::MissingToken)
+        ));
+    }
 }

@@ -3,8 +3,10 @@ name: Build Neongram Kotlin Android APK (Cloud CI)
 on:
   push:
     branches: [ "main" ]
+    paths-ignore: [ "anixart/**", ".github/workflows/anixart-*.yml" ]
   pull_request:
     branches: [ "main" ]
+    paths-ignore: [ "anixart/**", ".github/workflows/anixart-*.yml" ]
   workflow_dispatch:
 
 concurrency:

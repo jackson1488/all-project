@@ -1,0 +1,52 @@
+name: Anixart Reverse (jadx)
+
+on:
+  workflow_dispatch:
+    inputs:
+      apk_url:
+        description: "Direct URL to anixart.apk (leave empty to use anixart/input/anixart.apk from repo)"
+        required: false
+        default: ""
+
+jobs:
+  reverse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '21' }
+
+      - name: Get APK
+        run: |
+          mkdir -p work
+          if [ -n "${{ inputs.apk_url }}" ]; then
+            curl -fL "${{ inputs.apk_url }}" -o work/anixart.apk
+          else
+            cp anixart/input/anixart.apk work/anixart.apk
+          fi
+          ls -lh work/anixart.apk
+
+      - name: Install jadx
+        run: |
+          curl -fL https://github.com/skylot/jadx/releases/download/v1.5.1/jadx-1.5.1.zip -o jadx.zip
+          unzip -q jadx.zip -d jadx
+
+      - name: Decompile
+        run: jadx/bin/jadx -d work/out --show-bad-code -j 4 work/anixart.apk || true
+
+      - name: Extract API hints
+        run: |
+          mkdir -p work/hints
+          grep -rhoE '"(https?://[^"]+)"' work/out/sources | sort -u > work/hints/urls.txt || true
+          grep -rhE '@(GET|POST|PUT|DELETE|Headers|Query|Path|Body)\(' work/out/sources | sort -u > work/hints/retrofit.txt || true
+          grep -rlE 'CertificatePinner|X509TrustManager|HmacSHA|MessageDigest' work/out/sources > work/hints/security_files.txt || true
+          wc -l work/hints/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: anixart-reverse
+          path: |
+            work/hints
+            work/out/sources
+            work/out/resources/AndroidManifest.xml
+          retention-days: 14

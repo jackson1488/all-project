@@ -491,7 +491,7 @@ pub fn article_card<'a>(cache: &PosterCache, item: &FeedItem) -> Element<'a, Mes
         .channel
         .as_ref()
         .and_then(|channel| channel.title.as_deref().or(channel.name.as_deref()))
-        .and_then(non_blank)
+        .and_then(|s| non_blank(Some(s)))
         .unwrap_or("Anixart");
 
     let mut parts = vec![channel.to_owned(), util::date_label(item.creation_date)];

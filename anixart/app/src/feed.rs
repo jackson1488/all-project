@@ -117,11 +117,12 @@ mod tests {
     use super::*;
 
     fn pageable(items: Vec<FeedItem>, current: i32, total: i32) -> Pageable<FeedItem> {
+        let total_count = items.len() as i64;
         Pageable {
             code: 1,
             content: items,
             current_page: current,
-            total_count: items.len() as i64,
+            total_count,
             total_page_count: total,
         }
     }

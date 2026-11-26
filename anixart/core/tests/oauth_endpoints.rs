@@ -380,3 +380,180 @@ fn google_codes_differ_from_the_other_providers() {
     assert_eq!(oauth::codes::google::TOO_MANY_REGISTRATIONS, 11);
     assert_eq!(oauth::codes::TOO_MANY_REGISTRATIONS, 10);
 }
+
+// ---------------------------------------------------------------------------
+// Google → Firebase accounts:signInWithIdp
+// ---------------------------------------------------------------------------
+
+const FIREBASE_IDP_OK: &str = r#"{"kind":"identitytoolkit#VerifyAssertionResponse",
+"localId":"1234567890","email":"neko@gmail.com","verified_email":true,
+"idToken":"FIREBASE-ID-JWT","refreshToken":"fb-refresh","expiresIn":"3600",
+"federatedId":"1097654321","providerId":"google.com","rawId":"1097654321"}"#;
+
+fn http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .expect("http client")
+}
+
+#[tokio::test]
+async fn firebase_exchange_posts_the_google_id_token_as_postbody() {
+    let mock = MockServer::spawn("200 OK", FIREBASE_IDP_OK);
+    let endpoint = oauth::firebase_sign_in_with_idp_url_at(&mock.base, "AIzaTestKey");
+
+    let token = oauth::exchange_google_to_firebase_id_token_at(
+        &http_client(),
+        &endpoint,
+        "eyJhbGciOiJSUzI1NiJ9.eyJhdWQiOiIxIn0.signature",
+        false,
+    )
+    .await
+    .expect("exchange");
+
+    assert_eq!(token, "FIREBASE-ID-JWT");
+
+    let request = mock.request();
+    assert!(
+        request.starts_with("POST /v1/accounts:signInWithIdp?key=AIzaTestKey HTTP/1.1"),
+        "request line: {request}"
+    );
+    assert!(head_of(&request).contains("content-type: application/json"), "{request}");
+    let body: serde_json::Value = serde_json::from_str(body_of(&request)).expect("json body");
+    assert_eq!(
+        body["postBody"],
+        "id_token=eyJhbGciOiJSUzI1NiJ9.eyJhdWQiOiIxIn0.signature&providerId=google.com"
+    );
+    assert_eq!(body["requestUri"], "http://localhost");
+    assert_eq!(body["returnIdpCredential"], true);
+    assert_eq!(body["returnSecureToken"], true);
+}
+
+#[tokio::test]
+async fn firebase_exchange_marks_access_tokens_differently() {
+    let mock = MockServer::spawn("200 OK", FIREBASE_IDP_OK);
+    let endpoint = oauth::firebase_sign_in_with_idp_url_at(&mock.base, "K");
+
+    let token = oauth::exchange_google_to_firebase_id_token_at(
+        &http_client(),
+        &endpoint,
+        "ya29.a0AfB_byC7Qm8H",
+        oauth::google_token_is_access_token("ya29.a0AfB_byC7Qm8H"),
+    )
+    .await
+    .expect("exchange");
+
+    assert_eq!(token, "FIREBASE-ID-JWT");
+    let body: serde_json::Value = serde_json::from_str(body_of(&mock.request())).expect("json");
+    assert_eq!(body["postBody"], "access_token=ya29.a0AfB_byC7Qm8H&providerId=google.com");
+}
+
+#[tokio::test]
+async fn firebase_exchange_errors_become_oauth_errors() {
+    // Firebase answers 400 with an INVALID_IDP_RESPONSE payload.
+    let mock = MockServer::spawn(
+        "400 Bad Request",
+        r#"{"error":{"code":400,"message":"INVALID_IDP_RESPONSE","errors":[{"message":"INVALID_IDP_RESPONSE","domain":"global","reason":"invalid"}]}}"#,
+    );
+    let err = oauth::exchange_google_to_firebase_id_token_at(
+        &http_client(),
+        &oauth::firebase_sign_in_with_idp_url_at(&mock.base, "K"),
+        "bogus",
+        false,
+    )
+    .await
+    .expect_err("must fail");
+    assert!(
+        matches!(&err, AnixartError::OAuth(msg) if msg.contains("HTTP 400") && msg.contains("INVALID_IDP_RESPONSE")),
+        "{err:?}"
+    );
+
+    // A 200 without `idToken` is refused too.
+    let mock = MockServer::spawn("200 OK", r#"{"federatedId":"1097654321"}"#);
+    let err = oauth::exchange_google_to_firebase_id_token_at(
+        &http_client(),
+        &oauth::firebase_sign_in_with_idp_url_at(&mock.base, "K"),
+        "bogus",
+        false,
+    )
+    .await
+    .expect_err("must fail");
+    assert!(
+        matches!(&err, AnixartError::OAuth(msg) if msg == "Firebase signInWithIdp returned no idToken"),
+        "{err:?}"
+    );
+}
+
+#[tokio::test]
+async fn full_google_flow_exchanges_through_firebase_then_signs_in() {
+    let idp = MockServer::spawn("200 OK", FIREBASE_IDP_OK);
+    let api = MockServer::spawn("200 OK", SIGN_IN_OK);
+    let mut client = client(&api);
+    assert!(client.token().is_none());
+
+    let google_jwt = "eyJhbGciOiJSUzI1NiJ9.eyJhdWQiOiIxIn0.signature";
+    let endpoint = oauth::firebase_sign_in_with_idp_url_at(&idp.base, oauth::FIREBASE_API_KEY);
+    let resp = client
+        .sign_in_google_via_firebase_at(&endpoint, google_jwt, false)
+        .await
+        .expect("flow");
+
+    assert!(resp.is_success());
+    assert_eq!(client.token(), Some("tok_social"));
+
+    // step 1: identitytoolkit received the Google JWT as `id_token=…`
+    let idp_request = idp.request();
+    assert!(
+        idp_request.starts_with(&format!(
+            "POST /v1/accounts:signInWithIdp?key={} HTTP/1.1",
+            oauth::FIREBASE_API_KEY
+        )),
+        "request line: {idp_request}"
+    );
+    let body: serde_json::Value = serde_json::from_str(body_of(&idp_request)).expect("json");
+    assert_eq!(
+        body["postBody"],
+        format!("id_token={google_jwt}&providerId=google.com")
+    );
+
+    // step 2: auth/google received the **Firebase** idToken, not the Google one
+    let api_request = api.request();
+    assert!(api_request.starts_with("POST /auth/google HTTP/1.1"), "{api_request}");
+    assert_eq!(body_of(&api_request), "googleIdToken=FIREBASE-ID-JWT");
+}
+
+#[tokio::test]
+async fn firebase_exchange_failure_stops_before_anixart() {
+    let idp = MockServer::spawn("400 Bad Request", r#"{"error":{"message":"INVALID_ID_TOKEN"}}"#);
+    let api = MockServer::spawn("200 OK", SIGN_IN_OK);
+    let mut client = client(&api);
+
+    let endpoint = oauth::firebase_sign_in_with_idp_url_at(&idp.base, "K");
+    let err = client
+        .sign_in_google_via_firebase_at(&endpoint, "ey.abc.def", false)
+        .await
+        .expect_err("must fail");
+    assert!(matches!(&err, AnixartError::OAuth(msg) if msg.contains("HTTP 400")), "{err:?}");
+    assert!(client.token().is_none());
+    // auth/google was never reached: its mock socket is still unanswered, so a
+    // request there would hang instead of returning.
+    assert_eq!(
+        api.requests.recv_timeout(std::time::Duration::from_millis(50)),
+        Err(mpsc::RecvTimeoutError::Timeout)
+    );
+}
+
+#[test]
+fn the_baked_in_firebase_endpoint_matches_the_documented_url() {
+    assert_eq!(
+        oauth::firebase_sign_in_with_idp_url(oauth::FIREBASE_API_KEY),
+        "https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp\
+         ?key=AIzaSyBFPckWOsp0MEqb_1gwszvM1ILdUixM-uw"
+    );
+    // The client's own HTTP handle is reusable, which is what lets
+    // `sign_in_google_via_firebase_at` share its pool and default headers.
+    let client = AnixartClient::with_base_url("http://127.0.0.1:1/").expect("client");
+    let request = client.http().post("https://example.test/").build().expect("request");
+    assert_eq!(request.url().as_str(), "https://example.test/");
+    assert!(request.headers().contains_key("user-agent"));
+}

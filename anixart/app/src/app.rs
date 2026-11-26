@@ -49,8 +49,13 @@ pub enum Message {
     LoginVkSubmit,
 
     // ── Login: Google / Firebase ───────────────────────────────────────────
+    /// 1-click flow: loopback listener → browser → Firebase `signInWithIdp` →
+    /// `POST /auth/google`. Needs no client id, token or paste.
+    LoginGoogleBrowser,
     LoginGoogleClientId(String),
+    LoginFirebaseKey(String),
     LoginGoogleRedirect(String),
+    /// Manual, paste-back variant: opens the browser without a local listener.
     LoginGoogleOpen,
     LoginGooglePaste(String),
     LoginGoogleSubmit,
@@ -341,8 +346,31 @@ impl App {
                     }
                 }
             }
+            Message::LoginGoogleBrowser => {
+                if self.login.loading {
+                    return Task::none();
+                }
+                self.error = None;
+                self.login.loading = true;
+                self.status = Some(
+                    "Waiting on the browser — finish the Google sign-in there; this window \
+                     picks the redirect up on 127.0.0.1 and signs you in by itself."
+                        .to_owned(),
+                );
+                Task::perform(
+                    net::sign_in_google_browser(
+                        self.login.effective_google_client_id(),
+                        self.login.effective_firebase_api_key(),
+                    ),
+                    Message::LoggedIn,
+                )
+            }
             Message::LoginGoogleClientId(value) => {
                 self.login.google_client_id = value;
+                Task::none()
+            }
+            Message::LoginFirebaseKey(value) => {
+                self.login.firebase_api_key = value;
                 Task::none()
             }
             Message::LoginGoogleRedirect(value) => {
@@ -351,22 +379,14 @@ impl App {
             }
             Message::LoginGoogleOpen => {
                 self.error = None;
-                match self.login.prepare_google() {
-                    Some(url) => match open_url(&url) {
-                        Ok(()) => self.status = Some(
-                            "Google opened in the browser — paste the redirect URL (or the \
-                             Firebase ID token) here. Note that Anixart verifies a Firebase token."
-                                .to_owned(),
-                        ),
-                        Err(error) => self.error = Some(error),
-                    },
-                    None => {
-                        self.error = Some(
-                            "A Google OAuth client id is required to open the browser; \
-                             otherwise paste a token directly"
-                                .to_owned(),
-                        );
-                    }
+                let url = self.login.prepare_google();
+                match open_url(&url) {
+                    Ok(()) => self.status = Some(
+                        "Google opened in the browser (manual mode) — paste the URL it lands on \
+                         back here; a raw Google token is exchanged through Firebase automatically."
+                            .to_owned(),
+                    ),
+                    Err(error) => self.error = Some(error),
                 }
                 Task::none()
             }
@@ -378,20 +398,21 @@ impl App {
                 if self.login.loading {
                     return Task::none();
                 }
-                match self.login.google_credential() {
-                    Some(token) => {
-                        self.error = None;
-                        self.login.loading = true;
-                        Task::perform(net::sign_in_google(token), Message::LoggedIn)
-                    }
-                    None => {
-                        self.error = Some(
-                            "Paste the Google redirect URL (with id_token=…) or a Firebase ID token"
-                                .to_owned(),
-                        );
-                        Task::none()
-                    }
+                let pasted = self.login.google_paste.trim().to_owned();
+                if pasted.is_empty() {
+                    self.error = Some(
+                        "Use “Sign in with Google (Browser)” for a one-click login, or paste the \
+                         Google redirect URL (id_token=… / access_token=…) or a token"
+                            .to_owned(),
+                    );
+                    return Task::none();
                 }
+                self.error = None;
+                self.login.loading = true;
+                Task::perform(
+                    net::sign_in_google_auto(pasted, self.login.effective_firebase_api_key()),
+                    Message::LoggedIn,
+                )
             }
             Message::LoginTokenPaste(value) => {
                 self.login.token = value;

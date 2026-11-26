@@ -68,6 +68,14 @@ impl AnixartClient {
         self.token.as_deref()
     }
 
+    /// The underlying HTTP client (connection pool, default headers, timeouts).
+    ///
+    /// Exposed so the free-function OAuth helpers in [`crate::oauth`] reuse it
+    /// instead of building a fresh reqwest client per call.
+    pub fn http(&self) -> &Client {
+        &self.http
+    }
+
     fn url(&self, path: &str) -> String {
         let path = path.trim_start_matches('/');
         format!("{}{path}", self.base_url)
@@ -226,6 +234,10 @@ impl AnixartClient {
 
     /// `POST /auth/google` with a **Firebase** ID token (the Android client
     /// exchanges the Google `idToken` in Firebase first — see `oauth::google_id_token_hint`).
+    ///
+    /// A raw Google credential (`id_token` JWT or `ya29.…` access token) is
+    /// exchanged through [`Self::sign_in_google_via_firebase`] instead; the
+    /// implementation lives beside the OAuth request builders in [`crate::oauth`].
     pub async fn sign_in_google(
         &mut self,
         google_id_token: &str,

@@ -2,9 +2,11 @@
 //! `anixart-core` (REST API) and `anixart-parsers` (video host resolution).
 //!
 //! Screens: a login screen offering password, Telegram / VK / Google OAuth
-//! (system browser + pasted redirect or token) and a direct Anixart session
-//! token, then the feed, search, and a release page with voiceover / source /
-//! episode selection and playback through an external `mpv` process.
+//! (system browser + pasted redirect or token, plus a 1-click Google button that
+//! catches its own redirect on a loopback port and exchanges the credential
+//! through Firebase) and a direct Anixart session token, then the feed, search,
+//! and a release page with voiceover / source / episode selection and playback
+//! through an external `mpv` process.
 //!
 //! The resulting token is persisted to `~/.config/anixart-linux/session.json`
 //! (see [`session`]) and restored on the next start, so the user stays logged in.
@@ -605,16 +607,74 @@ mod app_tests {
     }
 
     #[test]
-    fn opening_google_without_a_client_id_explains_it() {
+    fn the_one_click_google_button_runs_without_any_setup() {
+        let mut app = App::with_store(SessionStore::disabled());
+        let _ = app.update(Message::LoginTab(LoginMethod::Google));
+
+        // Nothing typed, no token hunted: the APK client id / Firebase key are
+        // already in place, so the browser flow starts immediately.
+        assert_eq!(app.login.google_client_id, anixart_core::oauth::GOOGLE_WEB_CLIENT_ID);
+        assert_eq!(app.login.firebase_api_key, anixart_core::oauth::FIREBASE_API_KEY);
+
+        let _ = app.update(Message::LoginGoogleBrowser);
+        assert!(app.login.loading);
+        assert!(app.error.is_none());
+        assert!(app
+            .status
+            .as_deref()
+            .unwrap_or_default()
+            .contains("127.0.0.1"));
+
+        // Headless CI has no opener, so the task reports it through LoggedIn(Err)
+        // and the login screen stays usable with the paste fallback.
+        let _ = app.update(Message::LoggedIn(Err(
+            "Could not open the browser (no desktop opener found)".into(),
+        )));
+        assert!(!app.login.loading);
+        assert_eq!(app.screen, Screen::Login);
+        assert!(app.error.as_deref().unwrap().contains("desktop opener"));
+
+        // A second press while loading is ignored.
+        let _ = app.update(Message::LoginGooglePaste("ey.jwt.tok".into()));
+        let _ = app.update(Message::LoginGoogleSubmit);
+        assert!(app.login.loading);
+        let _ = app.update(Message::LoginGoogleBrowser);
+        assert!(app.login.loading);
+    }
+
+    #[test]
+    fn google_identifiers_can_be_overridden() {
+        let mut app = App::with_store(SessionStore::disabled());
+        let _ = app.update(Message::LoginTab(LoginMethod::Google));
+        let _ = app.update(Message::LoginGoogleClientId("custom.client.id".into()));
+        let _ = app.update(Message::LoginFirebaseKey("AIzaCustom".into()));
+
+        assert_eq!(app.login.effective_google_client_id(), "custom.client.id");
+        assert_eq!(app.login.effective_firebase_api_key(), "AIzaCustom");
+
+        // Clearing them restores the shipped values.
+        let _ = app.update(Message::LoginGoogleClientId(String::new()));
+        let _ = app.update(Message::LoginFirebaseKey(String::new()));
+        assert_eq!(
+            app.login.effective_google_client_id(),
+            anixart_core::oauth::GOOGLE_WEB_CLIENT_ID
+        );
+        assert_eq!(
+            app.login.effective_firebase_api_key(),
+            anixart_core::oauth::FIREBASE_API_KEY
+        );
+    }
+
+    #[test]
+    fn opening_google_in_manual_mode_always_yields_a_url() {
         let mut app = App::with_store(SessionStore::disabled());
         let _ = app.update(Message::LoginTab(LoginMethod::Google));
         let _ = app.update(Message::LoginGoogleOpen);
 
-        assert!(app
-            .error
-            .as_deref()
-            .unwrap_or_default()
-            .contains("Google OAuth client id is required"));
+        // No client id is required any more: the baked-in one is used, so the only
+        // possible failure is the missing desktop opener (headless CI).
+        assert!(app.status.is_some() || app.error.is_some());
+        assert!(!app.login.loading);
     }
 
     #[test]

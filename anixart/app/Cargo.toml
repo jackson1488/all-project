@@ -14,10 +14,15 @@ anixart-parsers = { path = "../parsers" }
 # winit 0.30 enables both Linux backends by default, so `tokio` is all we need.
 iced = { version = "0.13", features = ["tokio"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
-# Social login: `urlencoding` builds the browser authorize URLs, `serde_json`
-# reads/writes the persisted session (~/.config/anixart-linux/session.json).
+# Social login: `urlencoding` builds the browser authorize URLs and decodes the
+# loopback callback payload, `serde_json` reads/writes the persisted session
+# (~/.config/anixart-linux/session.json).
 urlencoding = "2"
 serde_json = "1"
+# 1-click Google sign-in: `tokio::net` runs the loopback callback listener that
+# catches the browser redirect, `tokio::time` bounds the wait. iced already drives
+# a tokio runtime (its `tokio` feature), so no second executor is introduced.
+tokio = { version = "1", features = ["net", "io-util", "time", "macros", "rt-multi-thread"] }
 
 [lib]
 name = "anixart_app"

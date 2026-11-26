@@ -5,15 +5,20 @@
 //! `utils/network/VkAuthHelper.java`, `ui/activity/AuthActivity.java`,
 //! `AndroidManifest.xml`) and documented in `anixart/docs/oauth.md`.
 //!
-//! Only the *Telegram* provider can be driven end-to-end from this crate
-//! (PKCE + authorize URL + code → `id_token` exchange). VK ID and Yandex ID
-//! tokens are produced by their vendor SDKs, and the Google credential is a
-//! Firebase ID token, so those three helpers only build requests / forward
-//! credentials.
+//! Only the *Telegram* and *Google* providers can be driven end-to-end from
+//! this crate: Telegram through PKCE (authorize URL + code → `id_token`
+//! exchange), Google through the Firebase `accounts:signInWithIdp` exchange
+//! ([`exchange_google_to_firebase_id_token`] and
+//! [`AnixartClient::sign_in_google_via_firebase`]) — the desktop stand-in for
+//! the Android client's `FirebaseAuth.signInWithCredential`. VK ID and Yandex ID
+//! tokens are produced by their vendor SDKs, so those two helpers only build
+//! requests.
 
 use sha2::{Digest, Sha256};
 
+use crate::client::AnixartClient;
 use crate::error::{AnixartError, Result};
+use crate::models::SocialSignInResponse;
 
 /// Response `code` values of `auth/{telegram,vk,google,yandex}`, `auth/verify`
 /// and `auth/resend` (see `network/response/auth/*Response.java`).
@@ -210,11 +215,31 @@ pub enum TelegramRedirect {
 }
 
 /// Extracts `code` / `error` (+ `error_description`) from a redirect URI.
+///
+/// Besides the absolute redirect URL the browser lands on
+/// (`https://app1593901251-login.tg.dev/tglogin?code=…`), the paste forms a user
+/// can produce by hand are accepted: `?code=…`, `code=…` and `…&code=…`. Only a
+/// bare `id_token` stays out of this function — anything carrying a `code=` or
+/// `error=` pair is treated as a redirect.
 pub fn parse_telegram_redirect(redirect_url: &str) -> TelegramRedirect {
     match reqwest::Url::parse(redirect_url) {
         Ok(url) => redirect_from_url(&url),
-        Err(e) => TelegramRedirect::Error(format!("Malformed redirect URI: {e}")),
+        Err(e) => match redirect_from_query_fragment(redirect_url) {
+            Some(parsed) => parsed,
+            None => TelegramRedirect::Error(format!("Malformed redirect URI: {e}")),
+        },
     }
+}
+
+/// Parses a redirect that was pasted without its `scheme://host` prefix.
+fn redirect_from_query_fragment(input: &str) -> Option<TelegramRedirect> {
+    let input = input.trim();
+    if !input.contains("code=") && !input.contains("error=") {
+        return None;
+    }
+    let query = input.trim_start_matches('?');
+    let url = reqwest::Url::parse(&format!("https://anixart.invalid/?{query}")).ok()?;
+    Some(redirect_from_url(&url))
 }
 
 fn redirect_from_url(url: &reqwest::Url) -> TelegramRedirect {
@@ -373,22 +398,208 @@ pub fn yandex_host_for_language(language: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Google
+// Google (browser sign-in + Firebase exchange)
 // ---------------------------------------------------------------------------
 
-/// The Google OAuth web client id lives in the Android string resource
-/// `default_web_client_id` (generated from `google-services.json`), so it is not
-/// part of the decompiled sources and must be supplied by the integrator.
+/// Google OAuth **web** client id of the Anixart Firebase project.
+///
+/// The Android client reads it from the `default_web_client_id` string resource
+/// that `google-services.json` generates. Both it and [`FIREBASE_API_KEY`] are
+/// client-side identifiers that ship inside the APK (they authenticate the
+/// *user*, not the caller, so they are not secrets), which lets a desktop client
+/// reuse them instead of asking the user to hunt for an OAuth client.
+pub const GOOGLE_WEB_CLIENT_ID: &str =
+    "983926366374-c3jvolf9t8e151mbgriuqi7uqnbt4c4p.apps.googleusercontent.com";
+/// Firebase **web** API key of the same `google-services.json`
+/// (`api_key[0].current_key`); authorises the Identity Toolkit calls below.
+pub const FIREBASE_API_KEY: &str = "AIzaSyBFPckWOsp0MEqb_1gwszvM1ILdUixM-uw";
+/// Name of the Android string resource the client id is generated into — kept
+/// for the decompiled-source cross-reference.
 pub const GOOGLE_CLIENT_ID_RESOURCE: &str = "default_web_client_id";
 /// Endpoint the app uses to revoke a Google credential.
 pub const GOOGLE_REVOKE_URL: &str = "https://accounts.google.com/o/oauth2/revoke?token=";
+/// Google OAuth authorize endpoint (implicit flow of the browser sign-in).
+pub const GOOGLE_OAUTH_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
+/// Scope the desktop client asks Google for.
+pub const GOOGLE_SCOPE: &str = "openid email profile";
+/// Firebase Authentication (Identity Toolkit) endpoint base.
+pub const FIREBASE_IDENTITY_TOOLKIT_BASE: &str = "https://identitytoolkit.googleapis.com/";
+/// The `signInWithIdp` method path, relative to [`FIREBASE_IDENTITY_TOOLKIT_BASE`].
+pub const FIREBASE_SIGN_IN_WITH_IDP_PATH: &str = "v1/accounts:signInWithIdp";
+/// `requestUri` Firebase expects from a non-Android client.
+pub const FIREBASE_REQUEST_URI: &str = "http://localhost";
 
 /// What `googleIdToken` really holds: a **Firebase** ID token.
 pub fn google_id_token_hint() -> &'static str {
     "GoogleSignIn (requestIdToken = <default_web_client_id>) -> \
      FirebaseAuth.signInWithCredential(GoogleAuthProvider credential) -> \
      FirebaseUser.getToken(true).token; that Firebase ID token is posted as \
-     googleIdToken to POST /auth/google."
+     googleIdToken to POST /auth/google. On the desktop client \
+     exchange_google_to_firebase_id_token performs the middle step through \
+     identitytoolkit.googleapis.com accounts:signInWithIdp."
+}
+
+/// `POST …/v1/accounts:signInWithIdp?key=…`
+///
+/// `endpoint_base` is whatever the request is aimed at (the production Identity
+/// Toolkit, an offline test listener, a self-hosted proxy); a trailing slash is
+/// optional.
+pub fn firebase_sign_in_with_idp_url_at(endpoint_base: &str, api_key: &str) -> String {
+    let base = if endpoint_base.ends_with('/') {
+        endpoint_base.to_owned()
+    } else {
+        format!("{endpoint_base}/")
+    };
+    format!(
+        "{base}{FIREBASE_SIGN_IN_WITH_IDP_PATH}?key={}",
+        urlencoding::encode(api_key)
+    )
+}
+
+/// [`firebase_sign_in_with_idp_url_at`] against the production Identity Toolkit
+/// endpoint.
+pub fn firebase_sign_in_with_idp_url(api_key: &str) -> String {
+    firebase_sign_in_with_idp_url_at(FIREBASE_IDENTITY_TOOLKIT_BASE, api_key)
+}
+
+/// JSON body of `accounts:signInWithIdp`.
+///
+/// `postBody` carries the IdP credential in `application/x-www-form-urlencoded`
+/// form — Firebase splits it on `&` / `=`, so an OAuth **access** token goes in
+/// as `access_token=…` and a signed **id_token** as `id_token=…`, always
+/// together with `providerId=google.com`.
+pub fn firebase_sign_in_with_idp_body(google_token: &str, is_access_token: bool) -> serde_json::Value {
+    let key = if is_access_token {
+        "access_token"
+    } else {
+        "id_token"
+    };
+    serde_json::json!({
+        "postBody": format!("{key}={}&providerId=google.com", urlencoding::encode(google_token)),
+        "requestUri": FIREBASE_REQUEST_URI,
+        "returnIdpCredential": true,
+        "returnSecureToken": true,
+    })
+}
+
+/// Pulls the Firebase ID token (`idToken`) out of a `signInWithIdp` response.
+pub fn extract_firebase_id_token(body: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(body).ok()?;
+    let token = value.get("idToken").and_then(serde_json::Value::as_str)?;
+    if token.is_empty() {
+        None
+    } else {
+        Some(token.to_string())
+    }
+}
+
+/// `true` when a Google credential is an opaque OAuth **access** token
+/// (`ya29.…`) rather than a signed `id_token` JWT (`header.payload.signature`).
+///
+/// Firebase accepts both, but under different `postBody` keys, so the browser
+/// flow has to tell them apart.
+pub fn google_token_is_access_token(token: &str) -> bool {
+    !is_google_id_token(token)
+}
+
+/// `true` for a three-segment base64url JWT (`eyJ…`.`…`.`…`).
+pub fn is_google_id_token(token: &str) -> bool {
+    let token = token.trim();
+    token.starts_with("ey") && token.matches('.').count() == 2
+}
+
+/// Implicit-flow authorize URL of the 1-click browser sign-in.
+///
+/// The redirect URI is the desktop client's own loopback listener
+/// (`http://127.0.0.1:<port>`, which Google accepts for web clients at any
+/// port), and `response_type=token id_token` asks for both credentials so the
+/// relay page can hand over an `id_token` — or an `access_token` when the client
+/// id is not enabled for the ID token.
+pub fn google_browser_authorize_url(client_id: &str, port: u16, nonce: &str) -> String {
+    format!(
+        "{GOOGLE_OAUTH_AUTH_URL}?client_id={}&redirect_uri={}&response_type=token%20id_token&scope={}&nonce={}",
+        urlencoding::encode(client_id),
+        urlencoding::encode(&format!("http://127.0.0.1:{port}")),
+        urlencoding::encode(GOOGLE_SCOPE),
+        urlencoding::encode(nonce),
+    )
+}
+
+/// Exchanges a Google credential for a **Firebase** ID token:
+/// `POST https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=…`.
+///
+/// This is the desktop stand-in for the Android client's
+/// `FirebaseAuth.signInWithCredential(GoogleAuthProvider …)`; the token it
+/// returns is what `POST /auth/google` expects as `googleIdToken`.
+///
+/// `is_access_token` selects the `postBody` key — see
+/// [`google_token_is_access_token`] for deriving it from the credential shape.
+pub async fn exchange_google_to_firebase_id_token(
+    http: &reqwest::Client,
+    firebase_api_key: &str,
+    google_id_or_access_token: &str,
+    is_access_token: bool,
+) -> Result<String> {
+    let url = firebase_sign_in_with_idp_url(firebase_api_key);
+    exchange_google_to_firebase_id_token_at(http, &url, google_id_or_access_token, is_access_token).await
+}
+
+/// [`exchange_google_to_firebase_id_token`] against an explicit endpoint URL
+/// (offline tests, or a self-hosted Identity Toolkit proxy).
+pub async fn exchange_google_to_firebase_id_token_at(
+    http: &reqwest::Client,
+    endpoint_url: &str,
+    google_id_or_access_token: &str,
+    is_access_token: bool,
+) -> Result<String> {
+    let body = firebase_sign_in_with_idp_body(google_id_or_access_token, is_access_token);
+    let resp = http.post(endpoint_url).json(&body).send().await?;
+    let status = resp.status();
+    let text = resp.text().await?;
+    if !status.is_success() {
+        return Err(AnixartError::OAuth(format!(
+            "Firebase signInWithIdp HTTP {}: {text}",
+            status.as_u16()
+        )));
+    }
+    extract_firebase_id_token(&text)
+        .ok_or_else(|| AnixartError::OAuth("Firebase signInWithIdp returned no idToken".into()))
+}
+
+impl AnixartClient {
+    /// Google credential → Firebase ID token → `POST /auth/google`.
+    ///
+    /// `is_access_token` marks the input as a `ya29.…` access token instead of a
+    /// Google `id_token` JWT (see [`google_token_is_access_token`]). The Firebase
+    /// API key the APK ships is used; another key or endpoint goes through
+    /// [`Self::sign_in_google_via_firebase_at`].
+    pub async fn sign_in_google_via_firebase(
+        &mut self,
+        google_token: &str,
+        is_access_token: bool,
+    ) -> Result<SocialSignInResponse> {
+        let url = firebase_sign_in_with_idp_url(FIREBASE_API_KEY);
+        self.sign_in_google_via_firebase_at(&url, google_token, is_access_token)
+            .await
+    }
+
+    /// [`Self::sign_in_google_via_firebase`] against an explicit Identity
+    /// Toolkit endpoint, which is also how a different API key is supplied.
+    pub async fn sign_in_google_via_firebase_at(
+        &mut self,
+        identity_toolkit_url: &str,
+        google_token: &str,
+        is_access_token: bool,
+    ) -> Result<SocialSignInResponse> {
+        let firebase_id_token = exchange_google_to_firebase_id_token_at(
+            self.http(),
+            identity_toolkit_url,
+            google_token,
+            is_access_token,
+        )
+        .await?;
+        self.sign_in_google(&firebase_id_token).await
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -740,5 +951,135 @@ mod tests {
         assert!(google_id_token_hint().contains("Firebase"));
         assert_eq!(GOOGLE_CLIENT_ID_RESOURCE, "default_web_client_id");
         assert!(GOOGLE_REVOKE_URL.contains("accounts.google.com"));
+    }
+
+    #[test]
+    fn apk_google_and_firebase_constants_are_the_shipped_ones() {
+        assert_eq!(
+            GOOGLE_WEB_CLIENT_ID,
+            "983926366374-c3jvolf9t8e151mbgriuqi7uqnbt4c4p.apps.googleusercontent.com"
+        );
+        assert!(GOOGLE_WEB_CLIENT_ID.ends_with(".apps.googleusercontent.com"));
+        assert_eq!(FIREBASE_API_KEY, "AIzaSyBFPckWOsp0MEqb_1gwszvM1ILdUixM-uw");
+        assert!(FIREBASE_API_KEY.starts_with("AIza"));
+        assert!(google_id_token_hint().contains("signInWithIdp"));
+    }
+
+    #[test]
+    fn firebase_sign_in_with_idp_url_shape() {
+        assert_eq!(
+            firebase_sign_in_with_idp_url("KEY"),
+            "https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=KEY"
+        );
+        // the production URL is the same builder over the baked-in base
+        assert_eq!(
+            firebase_sign_in_with_idp_url(FIREBASE_API_KEY),
+            firebase_sign_in_with_idp_url_at(FIREBASE_IDENTITY_TOOLKIT_BASE, FIREBASE_API_KEY)
+        );
+        // a trailing slash on the endpoint base is optional (offline test servers)
+        assert_eq!(
+            firebase_sign_in_with_idp_url_at("http://127.0.0.1:9", "K"),
+            firebase_sign_in_with_idp_url_at("http://127.0.0.1:9/", "K")
+        );
+        assert!(firebase_sign_in_with_idp_url_at("http://127.0.0.1:9/", "K")
+            .ends_with("v1/accounts:signInWithIdp?key=K"));
+        // reserved characters in a key are percent-encoded
+        assert!(firebase_sign_in_with_idp_url("a/b c").ends_with("?key=a%2Fb%20c"));
+    }
+
+    #[test]
+    fn firebase_body_selects_the_postbody_key() {
+        let id = firebase_sign_in_with_idp_body("eyJhbGciOiJSUzI1NiJ9.eyJhdWQiOiIxIn0.sig", false);
+        assert_eq!(
+            id["postBody"],
+            "id_token=eyJhbGciOiJSUzI1NiJ9.eyJhdWQiOiIxIn0.sig&providerId=google.com"
+        );
+        assert_eq!(id["requestUri"], "http://localhost");
+        assert_eq!(id["returnIdpCredential"], true);
+        assert_eq!(id["returnSecureToken"], true);
+
+        let access = firebase_sign_in_with_idp_body("ya29.a0ARW5m7XYZ", true);
+        assert_eq!(access["postBody"], "access_token=ya29.a0ARW5m7XYZ&providerId=google.com");
+        assert_eq!(access["requestUri"], "http://localhost");
+    }
+
+    #[test]
+    fn firebase_body_percent_encodes_the_credential() {
+        // A token with form-significant characters must survive the postBody split.
+        let body = firebase_sign_in_with_idp_body("a b&c=d/e", false);
+        let post = body["postBody"].as_str().expect("postBody");
+        assert!(post.starts_with("id_token=a%20b%26c%3Dd%2Fe&providerId=google.com"), "{post}");
+        // exactly one `&` separator: the credential itself contributes none
+        assert_eq!(post.matches('&').count(), 1);
+    }
+
+    #[test]
+    fn extract_firebase_id_token_variants() {
+        assert_eq!(
+            extract_firebase_id_token(
+                r#"{"kind":"identitytoolkit#VerifyAssertionResponse","localId":"1","idToken":"FB-JWT","refreshToken":"r"}"#
+            )
+            .as_deref(),
+            Some("FB-JWT")
+        );
+        assert!(extract_firebase_id_token(r#"{"idToken":""}"#).is_none());
+        assert!(extract_firebase_id_token(r#"{"refreshToken":"r"}"#).is_none());
+        assert!(extract_firebase_id_token(r#"{"idToken":42}"#).is_none());
+        assert!(extract_firebase_id_token(r#"{"error":{"message":"INVALID_IDP_RESPONSE"}}"#).is_none());
+        assert!(extract_firebase_id_token("not json").is_none());
+    }
+
+    #[test]
+    fn google_credentials_are_classified_by_shape() {
+        let jwt = "eyJhbGciOiJSUzI1NiJ9.eyJhdWQiOiIxIn0.signature";
+        assert!(is_google_id_token(jwt));
+        assert!(!google_token_is_access_token(jwt));
+        assert!(is_google_id_token("  ey.h.s  "), "surrounding whitespace is trimmed");
+
+        assert!(google_token_is_access_token("ya29.a0AfB_byC7Qm"));
+        assert!(!is_google_id_token("ya29.a0AfB_byC7Qm"));
+        assert!(google_token_is_access_token("not-a-jwt"), "opaque payloads are access tokens");
+        assert!(!is_google_id_token("ey.two_segments"), "two segments are not a JWT");
+        assert!(!is_google_id_token(""));
+    }
+
+    #[test]
+    fn google_browser_url_points_at_the_loopback_listener() {
+        let url = google_browser_authorize_url(GOOGLE_WEB_CLIENT_ID, 43211, "nonce value");
+        assert!(
+            url.starts_with("https://accounts.google.com/o/oauth2/v2/auth?client_id=983926366374"),
+            "{url}"
+        );
+        assert!(url.contains(
+            "&redirect_uri=http%3A%2F%2F127.0.0.1%3A43211&response_type=token%20id_token"
+        ));
+        assert!(url.contains("&scope=openid%20email%20profile&nonce=nonce%20value"));
+        assert_eq!(GOOGLE_SCOPE, "openid email profile");
+    }
+
+    #[test]
+    fn parse_telegram_redirect_accepts_a_bare_code() {
+        // What a user copies out of the address bar when the page itself is blank.
+        assert_eq!(
+            parse_telegram_redirect("?code=abc123&state=xyz"),
+            TelegramRedirect::Code("abc123".into())
+        );
+        assert_eq!(
+            parse_telegram_redirect("code=abc123"),
+            TelegramRedirect::Code("abc123".into())
+        );
+        assert_eq!(
+            parse_telegram_redirect("  code=abc123&state=1  "),
+            TelegramRedirect::Code("abc123".into())
+        );
+        assert_eq!(
+            parse_telegram_redirect("?error=access_denied&error_description=User%20cancelled"),
+            TelegramRedirect::Error("User cancelled".into())
+        );
+        // a bare id_token still is not a redirect: the caller keeps the JWT
+        assert!(matches!(
+            parse_telegram_redirect("eyJhbGciOiJSUzI1NiJ9.eyJhdWQiOiIxIn0.sig"),
+            TelegramRedirect::Error(msg) if msg.starts_with("Malformed redirect URI:")
+        ));
     }
 }

@@ -1,8 +1,13 @@
 //! Anixart Linux client library: an iced 0.13 UI (modern Wayland / X11) wired to
 //! `anixart-core` (REST API) and `anixart-parsers` (video host resolution).
 //!
-//! Screens: login, feed, search, release page with voiceover / source / episode
-//! selection, and playback through an external `mpv` process.
+//! Screens: a login screen offering password, Telegram / VK / Google OAuth
+//! (system browser + pasted redirect or token) and a direct Anixart session
+//! token, then the feed, search, and a release page with voiceover / source /
+//! episode selection and playback through an external `mpv` process.
+//!
+//! The resulting token is persisted to `~/.config/anixart-linux/session.json`
+//! (see [`session`]) and restored on the next start, so the user stays logged in.
 
 pub mod app;
 pub mod feed;
@@ -10,6 +15,7 @@ pub mod login;
 pub mod net;
 pub mod release;
 pub mod search;
+pub mod session;
 
 pub use app::{App, Message, Screen};
 
@@ -262,7 +268,9 @@ mod tests {
 #[cfg(test)]
 mod app_tests {
     use crate::app::{play_with_mpv, App, Message, Screen};
+    use crate::login::LoginMethod;
     use crate::release::ReleaseView;
+    use crate::session::SessionStore;
 
     use anixart_core::{FeedItem, Pageable};
     use anixart_parsers::{ParsedVideo, VideoSource};
@@ -273,17 +281,28 @@ mod app_tests {
     }
 
     #[test]
-    fn startup_lands_on_login() {
-        let (app, _task) = App::startup();
+    fn startup_lands_on_login_without_a_saved_session() {
+        let mut app = App::with_store(SessionStore::disabled());
+        let _ = app.restore_session();
+
         assert_eq!(app.screen, Screen::Login);
         assert!(app.token.is_none());
         assert!(app.stack.is_empty());
         assert!(app.error.is_none());
+        assert!(app.status.is_none());
+    }
+
+    #[test]
+    fn startup_matches_whatever_the_environment_holds() {
+        let (app, _task) = App::startup();
+        // A restored session implies the feed; nothing else may skip login.
+        assert_eq!(app.screen == Screen::Feed, app.token.is_some());
+        assert!(app.stack.is_empty());
     }
 
     #[test]
     fn failed_login_stays_on_login() {
-        let (mut app, _) = App::startup();
+        let mut app = App::with_store(SessionStore::disabled());
         let _ = app.update(Message::LoginUsername("user".into()));
         let _ = app.update(Message::LoggedIn(Err("401 invalid password".into())));
 
@@ -294,7 +313,7 @@ mod app_tests {
 
     #[test]
     fn blank_username_does_not_start_a_login() {
-        let (mut app, _) = App::startup();
+        let mut app = App::with_store(SessionStore::disabled());
         let _ = app.update(Message::LoginUsername("   ".into()));
         let _ = app.update(Message::LoginSubmit);
 
@@ -304,7 +323,7 @@ mod app_tests {
 
     #[test]
     fn successful_login_opens_the_feed() {
-        let (mut app, _) = App::startup();
+        let mut app = App::with_store(SessionStore::disabled());
         let _ = app.update(Message::LoginPassword("secret".into()));
         let _ = app.update(Message::LoggedIn(Ok("token-xyz".into())));
 
@@ -319,7 +338,7 @@ mod app_tests {
 
     #[test]
     fn feed_loaded_stores_items_and_pages() {
-        let (mut app, _) = App::startup();
+        let mut app = App::with_store(SessionStore::disabled());
         let pageable = Pageable {
             code: 0,
             content: vec![FeedItem {
@@ -340,7 +359,7 @@ mod app_tests {
 
     #[test]
     fn feed_error_clears_loading() {
-        let (mut app, _) = App::startup();
+        let mut app = App::with_store(SessionStore::disabled());
         app.feed.loading = true;
         let _ = app.update(Message::FeedLoaded(Err("offline".into())));
 
@@ -350,7 +369,7 @@ mod app_tests {
 
     #[test]
     fn blank_search_query_is_ignored() {
-        let (mut app, _) = App::startup();
+        let mut app = App::with_store(SessionStore::disabled());
         let _ = app.update(Message::SearchQuery("   ".into()));
         let _ = app.update(Message::SearchSubmit);
 
@@ -360,7 +379,7 @@ mod app_tests {
 
     #[test]
     fn navigation_pushes_and_pops_the_stack() {
-        let (mut app, _) = App::startup();
+        let mut app = App::with_store(SessionStore::disabled());
         app.token = Some("token".into());
         app.screen = Screen::Feed;
         app.stack = Vec::new();
@@ -380,7 +399,7 @@ mod app_tests {
 
     #[test]
     fn logout_resets_everything() {
-        let (mut app, _) = App::startup();
+        let mut app = App::with_store(SessionStore::disabled());
         app.token = Some("token".into());
         app.screen = Screen::Release;
         app.stack = vec![Screen::Feed, Screen::Search];
@@ -398,7 +417,7 @@ mod app_tests {
 
     #[test]
     fn select_type_out_of_range_is_a_noop() {
-        let (mut app, _) = App::startup();
+        let mut app = App::with_store(SessionStore::disabled());
         let _ = app.update(Message::SelectType(7));
 
         assert!(app.release.selected_type.is_none());
@@ -407,7 +426,7 @@ mod app_tests {
 
     #[test]
     fn select_source_out_of_range_is_a_noop() {
-        let (mut app, _) = App::startup();
+        let mut app = App::with_store(SessionStore::disabled());
         app.release = ReleaseView {
             selected_type: Some(0),
             ..Default::default()
@@ -420,7 +439,7 @@ mod app_tests {
 
     #[test]
     fn release_back_walks_the_selection_levels() {
-        let (mut app, _) = App::startup();
+        let mut app = App::with_store(SessionStore::disabled());
         app.release = ReleaseView {
             release: None,
             selected_type: Some(0),
@@ -448,7 +467,7 @@ mod app_tests {
 
     #[test]
     fn play_episode_without_url_reports_an_error() {
-        let (mut app, _) = App::startup();
+        let mut app = App::with_store(SessionStore::disabled());
         app.release.episodes = vec![Default::default()];
         let _ = app.update(Message::PlayEpisode(0));
 
@@ -458,7 +477,7 @@ mod app_tests {
 
     #[test]
     fn playback_failure_clears_the_pending_episode() {
-        let (mut app, _) = App::startup();
+        let mut app = App::with_store(SessionStore::disabled());
         app.release.pending = Some(2);
         let _ = app.update(Message::PlaybackResolved(Err("resolver down".into())));
 
@@ -475,10 +494,181 @@ mod app_tests {
 
     #[test]
     fn dismissing_error_clears_it() {
-        let (mut app, _) = App::startup();
+        let mut app = App::with_store(SessionStore::disabled());
         app.error = Some("temporary".into());
         let _ = app.update(Message::DismissError);
 
         assert!(app.error.is_none());
+    }
+
+    #[test]
+    fn dismissing_status_clears_it() {
+        let mut app = App::with_store(SessionStore::disabled());
+        app.status = Some("Telegram opened in the browser".into());
+        let _ = app.update(Message::DismissStatus);
+
+        assert!(app.status.is_none());
+    }
+
+    // ── Login tabs and social flows ────────────────────────────────────────
+
+    fn temp_store(tag: &str) -> SessionStore {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos())
+            .unwrap_or(0);
+        let root = std::env::temp_dir().join(format!("anixart-app-{tag}-{nanos:09}"));
+        SessionStore::with_root(root)
+    }
+
+    #[test]
+    fn switching_tab_clears_the_previous_error() {
+        let mut app = App::with_store(SessionStore::disabled());
+        app.error = Some("bad password".into());
+
+        let _ = app.update(Message::LoginTab(LoginMethod::Telegram));
+        assert_eq!(app.login.method, LoginMethod::Telegram);
+        assert!(app.error.is_none());
+        assert_eq!(app.screen, Screen::Login);
+    }
+
+    #[test]
+    fn telegram_redirect_needs_the_verifier_it_generated() {
+        let mut app = App::with_store(SessionStore::disabled());
+        let _ = app.update(Message::LoginTab(LoginMethod::Telegram));
+        let _ = app.update(Message::LoginTelegramPaste(
+            "https://app1593901251-login.tg.dev/tglogin?code=abc".into(),
+        ));
+        let _ = app.update(Message::LoginTelegramSubmit);
+
+        assert!(!app.login.loading);
+        assert_eq!(app.screen, Screen::Login);
+        assert!(app
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .starts_with("Open the Telegram login first"));
+    }
+
+    #[test]
+    fn telegram_id_token_paste_goes_straight_to_the_backend() {
+        let mut app = App::with_store(SessionStore::disabled());
+        let _ = app.update(Message::LoginTab(LoginMethod::Telegram));
+        let _ = app.update(Message::LoginTelegramPaste(
+            "eyJhbGciOiJSUzI1NiJ9.eyJhdWQiOiIxIn0.signature".into(),
+        ));
+        let _ = app.update(Message::LoginTelegramSubmit);
+
+        assert!(app.login.loading);
+        assert!(app.error.is_none());
+    }
+
+    #[test]
+    fn empty_pastes_are_rejected_without_a_request() {
+        let mut app = App::with_store(SessionStore::disabled());
+
+        let _ = app.update(Message::LoginTab(LoginMethod::Vk));
+        let _ = app.update(Message::LoginVkSubmit);
+        assert!(!app.login.loading);
+        assert!(app.error.as_deref().unwrap().contains("VK ID redirect URL"));
+
+        let _ = app.update(Message::LoginTab(LoginMethod::Google));
+        let _ = app.update(Message::LoginGoogleSubmit);
+        assert!(!app.login.loading);
+        assert!(app.error.as_deref().unwrap().contains("id_token"));
+
+        let _ = app.update(Message::LoginTab(LoginMethod::Token));
+        let _ = app.update(Message::LoginTokenSubmit);
+        assert!(app.error.as_deref().unwrap().contains("Paste an Anixart session token"));
+        assert_eq!(app.screen, Screen::Login);
+    }
+
+    #[test]
+    fn vk_and_google_tokens_start_their_requests() {
+        let mut app = App::with_store(SessionStore::disabled());
+
+        let _ = app.update(Message::LoginTab(LoginMethod::Vk));
+        let _ = app.update(Message::LoginVkPaste(
+            "vk54701760://vk.ru/blank.html#access_token=VK&TTL=7200".into(),
+        ));
+        let _ = app.update(Message::LoginVkSubmit);
+        assert!(app.login.loading);
+
+        let _ = app.update(Message::LoggedIn(Err("Anixart rejected the credential".into())));
+        assert!(!app.login.loading);
+        assert_eq!(app.screen, Screen::Login);
+
+        let _ = app.update(Message::LoginTab(LoginMethod::Google));
+        let _ = app.update(Message::LoginGooglePaste("firebase.id.token".into()));
+        let _ = app.update(Message::LoginGoogleSubmit);
+        assert!(app.login.loading);
+    }
+
+    #[test]
+    fn opening_google_without_a_client_id_explains_it() {
+        let mut app = App::with_store(SessionStore::disabled());
+        let _ = app.update(Message::LoginTab(LoginMethod::Google));
+        let _ = app.update(Message::LoginGoogleOpen);
+
+        assert!(app
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("Google OAuth client id is required"));
+    }
+
+    #[test]
+    fn opening_a_provider_url_either_succeeds_or_reports_the_opener() {
+        let mut app = App::with_store(SessionStore::disabled());
+        let _ = app.update(Message::LoginTab(LoginMethod::Telegram));
+        let _ = app.update(Message::LoginTelegramOpen);
+
+        // Headless CI has no xdg-open, so one of the two is set; both mean the
+        // PKCE verifier was generated and the URL was handed to the desktop.
+        assert!(app.status.is_some() || app.error.is_some());
+        assert!(!app.login.telegram_verifier.is_empty());
+    }
+
+    #[test]
+    fn a_direct_token_logs_in_without_any_request() {
+        let mut app = App::with_store(SessionStore::disabled());
+        let _ = app.update(Message::LoginTab(LoginMethod::Token));
+        let _ = app.update(Message::LoginTokenPaste("  tok-direct  ".into()));
+        let _ = app.update(Message::LoginTokenSubmit);
+
+        assert_eq!(app.token.as_deref(), Some("tok-direct"));
+        assert_eq!(app.screen, Screen::Feed);
+        assert!(app.feed.loading);
+        assert!(app.error.is_none());
+        assert!(app.status.as_deref().unwrap().contains("Signed in via Token"));
+    }
+
+    #[test]
+    fn a_saved_session_restores_into_the_feed() {
+        let store = temp_store("restore");
+        let _ = std::fs::remove_dir_all(store.path().unwrap().parent().unwrap());
+
+        let mut app = App::with_store(store.clone());
+        let _ = app.update(Message::LoginTab(LoginMethod::Telegram));
+        let _ = app.update(Message::LoginTelegramPaste("jwt.id.token".into()));
+        let _ = app.update(Message::LoggedIn(Ok("tok-telegram".into())));
+        assert_eq!(app.token.as_deref(), Some("tok-telegram"));
+        assert!(app.error.is_none());
+
+        // A brand-new process sees the persisted token.
+        let mut reopened = App::with_store(store.clone());
+        assert_eq!(reopened.screen, Screen::Login);
+        let _ = reopened.restore_session();
+        assert_eq!(reopened.token.as_deref(), Some("tok-telegram"));
+        assert_eq!(reopened.screen, Screen::Feed);
+        assert!(reopened.feed.loading);
+        assert!(reopened.status.as_deref().unwrap().contains("telegram"));
+
+        // Logging out wipes the file.
+        let _ = reopened.update(Message::Logout);
+        assert!(reopened.token.is_none());
+        assert_eq!(reopened.screen, Screen::Login);
+        assert!(store.load().is_none());
+        assert!(store.clear().is_ok());
     }
 }

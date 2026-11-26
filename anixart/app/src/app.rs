@@ -1,6 +1,6 @@
 //! Application state, message routing, and screen composition.
 
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use anixart_core::{
     Episode, EpisodeType, FeedItem, Pageable, Release, ReleaseSearchResponse, Source,
@@ -10,10 +10,11 @@ use iced::widget::{button, horizontal_space, text, Column, Row};
 use iced::{Element, Task, Theme};
 
 use crate::feed::Feed;
-use crate::login::Login;
+use crate::login::{Login, LoginMethod, TelegramPaste};
 use crate::net;
 use crate::release::ReleaseView;
 use crate::search::Search;
+use crate::session::SessionStore;
 
 /// Screens of the client.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -28,9 +29,37 @@ pub enum Screen {
 /// Messages handled by [`App::update`].
 #[derive(Debug, Clone)]
 pub enum Message {
+    // ── Login: shared ──────────────────────────────────────────────────────
+    LoginTab(LoginMethod),
+    DismissStatus,
+
+    // ── Login: username / password ─────────────────────────────────────────
     LoginUsername(String),
     LoginPassword(String),
     LoginSubmit,
+
+    // ── Login: Telegram (OAuth 2.0 + PKCE Login Widget) ────────────────────
+    LoginTelegramOpen,
+    LoginTelegramPaste(String),
+    LoginTelegramSubmit,
+
+    // ── Login: VK ID ───────────────────────────────────────────────────────
+    LoginVkOpen,
+    LoginVkPaste(String),
+    LoginVkSubmit,
+
+    // ── Login: Google / Firebase ───────────────────────────────────────────
+    LoginGoogleClientId(String),
+    LoginGoogleRedirect(String),
+    LoginGoogleOpen,
+    LoginGooglePaste(String),
+    LoginGoogleSubmit,
+
+    // ── Login: direct Anixart token ────────────────────────────────────────
+    LoginTokenPaste(String),
+    LoginTokenSubmit,
+
+    /// Every login method converges here with the Anixart session token.
     LoggedIn(Result<String, String>),
 
     Nav(Screen),
@@ -65,10 +94,14 @@ pub struct App {
     pub screen: Screen,
     pub stack: Vec<Screen>,
     pub error: Option<String>,
+    /// Informational line (restored session, browser hand-off, …).
+    pub status: Option<String>,
     pub login: Login,
     pub feed: Feed,
     pub search: Search,
     pub release: ReleaseView,
+    /// Where the session token is persisted across restarts.
+    pub store: SessionStore,
 }
 
 /// Hands the best available stream to an external `mpv` process, forwarding the
@@ -91,16 +124,111 @@ pub fn play_with_mpv(video: &ParsedVideo) -> Result<(), String> {
     Ok(())
 }
 
+/// Opens a URL in the user's browser — `xdg-open` (then `gio` /
+/// `sensible-browser`) on Linux, `open` on macOS, `cmd /C start` on Windows.
+///
+/// Returns the URL inside the error when no opener exists, so the user can copy
+/// it into a browser by hand (the OAuth flows only need the *final* redirect
+/// URL back in this window, never a live browser callback).
+pub fn open_url(url: &str) -> Result<(), String> {
+    if url.trim().is_empty() {
+        return Err("Nothing to open".to_owned());
+    }
+
+    let mut last_error = "no desktop opener found".to_owned();
+    for mut candidate in browser_commands(url) {
+        candidate
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        match candidate.spawn() {
+            Ok(_) => return Ok(()),
+            Err(error) => last_error = error.to_string(),
+        }
+    }
+    Err(format!("Could not open the browser ({last_error}).\nOpen this URL manually: {url}"))
+}
+
+/// Opener candidates for the host platform, in preference order.
+fn browser_commands(url: &str) -> Vec<Command> {
+    let mut candidates: Vec<Command> = Vec::new();
+
+    #[cfg(target_os = "windows")]
+    {
+        let mut command = Command::new("cmd");
+        command.args(["/C", "start", "", url]);
+        candidates.push(command);
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let mut command = Command::new("open");
+        command.arg(url);
+        candidates.push(command);
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        let mut xdg = Command::new("xdg-open");
+        xdg.arg(url);
+        candidates.push(xdg);
+
+        let mut gio = Command::new("gio");
+        gio.args(["open", url]);
+        candidates.push(gio);
+
+        let mut sensible = Command::new("sensible-browser");
+        sensible.arg(url);
+        candidates.push(sensible);
+    }
+
+    candidates
+}
+
 impl App {
-    /// Initial state of the application.
+    /// Builds the app with an explicit session store (tests, portable installs).
+    pub fn with_store(store: SessionStore) -> Self {
+        Self {
+            store,
+            ..Default::default()
+        }
+    }
+
+    /// Initial state of the application: restores a persisted session when the
+    /// config file holds one and jumps straight to the feed.
     pub fn startup() -> (Self, Task<Message>) {
-        (Self::default(), Task::none())
+        let mut app = Self::with_store(SessionStore::from_env());
+        let task = app.restore_session();
+        (app, task)
+    }
+
+    /// Adopts the session stored on disk, when there is one.
+    pub fn restore_session(&mut self) -> Task<Message> {
+        match self.store.load() {
+            Some(session) => {
+                self.status = Some(format!("Restored a {} session", session.method));
+                self.token = Some(session.token);
+                self.screen = Screen::Feed;
+                self.fetch_feed(0)
+            }
+            None => Task::none(),
+        }
     }
 
     /// Routes a [`Message`], optionally returning an async task to run.
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             // ── Login ──────────────────────────────────────────────────────
+            Message::LoginTab(method) => {
+                self.login.method = method;
+                self.login.loading = false;
+                self.error = None;
+                Task::none()
+            }
+            Message::DismissStatus => {
+                self.status = None;
+                Task::none()
+            }
             Message::LoginUsername(value) => {
                 self.login.username = value;
                 Task::none()
@@ -125,16 +253,160 @@ impl App {
                     Message::LoggedIn,
                 )
             }
-            Message::LoggedIn(Ok(token)) => {
-                self.login.loading = false;
-                self.login.password.clear();
+            Message::LoginTelegramOpen => {
+                let url = self.login.prepare_telegram();
                 self.error = None;
-                self.token = Some(token);
-                self.stack.clear();
-                self.screen = Screen::Feed;
-                self.feed = Default::default();
-                self.fetch_feed(0)
+                match open_url(&url) {
+                    Ok(()) => self.status = Some(
+                        "Telegram opened in the browser — paste the redirect URL here when it loads."
+                            .to_owned(),
+                    ),
+                    Err(error) => self.error = Some(error),
+                }
+                Task::none()
             }
+            Message::LoginTelegramPaste(value) => {
+                self.login.telegram_paste = value;
+                Task::none()
+            }
+            Message::LoginTelegramSubmit => {
+                if self.login.loading {
+                    return Task::none();
+                }
+                let credential = match self.login.telegram_credential() {
+                    Some(credential) => credential,
+                    None => {
+                        self.error =
+                            Some("Paste the redirect URL or a Telegram id_token".to_owned());
+                        return Task::none();
+                    }
+                };
+
+                self.error = None;
+                self.login.loading = true;
+                match credential {
+                    TelegramPaste::Redirect(_) if self.login.telegram_verifier.is_empty() => {
+                        self.login.loading = false;
+                        self.error = Some(
+                            "Open the Telegram login first — the code needs the PKCE verifier \
+                             that action generated"
+                                .to_owned(),
+                        );
+                        Task::none()
+                    }
+                    TelegramPaste::Redirect(url) => {
+                        let verifier = self.login.telegram_verifier.clone();
+                        Task::perform(
+                            net::sign_in_telegram_redirect(url, verifier),
+                            Message::LoggedIn,
+                        )
+                    }
+                    TelegramPaste::IdToken(token) => {
+                        Task::perform(net::sign_in_telegram_id_token(token), Message::LoggedIn)
+                    }
+                }
+            }
+            Message::LoginVkOpen => {
+                let url = self.login.prepare_vk();
+                self.error = None;
+                match open_url(&url) {
+                    Ok(()) => self.status = Some(
+                        "VK ID opened in the browser — paste the URL it redirects to here."
+                            .to_owned(),
+                    ),
+                    Err(error) => self.error = Some(error),
+                }
+                Task::none()
+            }
+            Message::LoginVkPaste(value) => {
+                self.login.vk_paste = value;
+                Task::none()
+            }
+            Message::LoginVkSubmit => {
+                if self.login.loading {
+                    return Task::none();
+                }
+                match self.login.vk_credential() {
+                    Some(token) => {
+                        self.error = None;
+                        self.login.loading = true;
+                        Task::perform(net::sign_in_vk(token), Message::LoggedIn)
+                    }
+                    None => {
+                        self.error = Some(
+                            "Paste the VK ID redirect URL (with access_token=…) or an access token"
+                                .to_owned(),
+                        );
+                        Task::none()
+                    }
+                }
+            }
+            Message::LoginGoogleClientId(value) => {
+                self.login.google_client_id = value;
+                Task::none()
+            }
+            Message::LoginGoogleRedirect(value) => {
+                self.login.google_redirect = value;
+                Task::none()
+            }
+            Message::LoginGoogleOpen => {
+                self.error = None;
+                match self.login.prepare_google() {
+                    Some(url) => match open_url(&url) {
+                        Ok(()) => self.status = Some(
+                            "Google opened in the browser — paste the redirect URL (or the \
+                             Firebase ID token) here. Note that Anixart verifies a Firebase token."
+                                .to_owned(),
+                        ),
+                        Err(error) => self.error = Some(error),
+                    },
+                    None => {
+                        self.error = Some(
+                            "A Google OAuth client id is required to open the browser; \
+                             otherwise paste a token directly"
+                                .to_owned(),
+                        );
+                    }
+                }
+                Task::none()
+            }
+            Message::LoginGooglePaste(value) => {
+                self.login.google_paste = value;
+                Task::none()
+            }
+            Message::LoginGoogleSubmit => {
+                if self.login.loading {
+                    return Task::none();
+                }
+                match self.login.google_credential() {
+                    Some(token) => {
+                        self.error = None;
+                        self.login.loading = true;
+                        Task::perform(net::sign_in_google(token), Message::LoggedIn)
+                    }
+                    None => {
+                        self.error = Some(
+                            "Paste the Google redirect URL (with id_token=…) or a Firebase ID token"
+                                .to_owned(),
+                        );
+                        Task::none()
+                    }
+                }
+            }
+            Message::LoginTokenPaste(value) => {
+                self.login.token = value;
+                Task::none()
+            }
+            Message::LoginTokenSubmit => {
+                let token = self.login.token.trim().to_owned();
+                if token.is_empty() {
+                    self.error = Some("Paste an Anixart session token first".to_owned());
+                    return Task::none();
+                }
+                self.error = None;
+                self.accept_token(token)
+            }
+            Message::LoggedIn(Ok(token)) => self.accept_token(token),
             Message::LoggedIn(Err(error)) => {
                 self.login.loading = false;
                 self.error = Some(error);
@@ -155,7 +427,8 @@ impl App {
                 Task::none()
             }
             Message::Logout => {
-                *self = Default::default();
+                let _ = self.store.clear();
+                *self = Self::with_store(SessionStore::from_env());
                 Task::none()
             }
             Message::DismissError => {
@@ -337,9 +610,20 @@ impl App {
         }
     }
 
-    /// Root view: navigation bar, error banner, and the active screen.
+    /// Root view: navigation bar, status / error banners, and the active screen.
     pub fn view(&self) -> Element<'_, Message> {
         let mut root = Column::new().spacing(12).padding(12).push(self.navbar());
+
+        if let Some(status) = &self.status {
+            let message = status.clone();
+            root = root.push(
+                Row::new()
+                    .spacing(10)
+                    .push(text(message).size(14).color([0.55, 0.9, 0.65]))
+                    .push(horizontal_space())
+                    .push(button("Dismiss").on_press(Message::DismissStatus)),
+            );
+        }
 
         if let Some(error) = &self.error {
             let message = error.clone();
@@ -359,6 +643,35 @@ impl App {
             Screen::Release => self.release.view(),
         })
         .into()
+    }
+
+    /// Common tail of every login method: adopt the token, persist it, and open
+    /// the feed.
+    fn accept_token(&mut self, token: String) -> Task<Message> {
+        let method = self.login.method;
+        self.login.loading = false;
+        self.login.password.clear();
+        self.token = Some(token.clone());
+        self.stack.clear();
+        self.screen = Screen::Feed;
+        self.feed = Default::default();
+
+        match self.store.save(&token, method.as_str()) {
+            Ok(()) => {
+                let location = self
+                    .store
+                    .path()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| "the config file".to_owned());
+                let label = method.label();
+                self.status = Some(format!("Signed in via {label} — session saved to {location}"));
+            }
+            Err(error) => {
+                self.error = Some(format!("Signed in, but the session was not persisted: {error}"));
+            }
+        }
+
+        self.fetch_feed(0)
     }
 
     fn fetch_feed(&mut self, page: usize) -> Task<Message> {

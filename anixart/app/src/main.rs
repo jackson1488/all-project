@@ -12,7 +12,7 @@ mod search;
 // ── Screen ──────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum Screen {
+pub enum Screen {
     Login,
     Feed,
     Search,
@@ -58,7 +58,7 @@ pub enum Message {
     FeedFail(String),
     SearchOk(ReleaseSearchResponse),
     SearchFail(String),
-    ReleaseOk(Release),
+    ReleaseOk(Box<Release>),
     ReleaseFail(String),
     TypesOk(Vec<EpisodeType>),
     TypesFail(String),
@@ -298,13 +298,13 @@ impl Application for AnixartApp {
                 self.release_screen = release::ReleaseScreen::new();
                 let c = self.client.clone();
                 Command::perform(release_detail(c, id), move |r| match r {
-                    Ok(rel) => Message::ReleaseOk(rel),
+                    Ok(rel) => Message::ReleaseOk(Box::new(rel)),
                     Err(e) => Message::ReleaseFail(e),
                 })
             }
             Message::ReleaseOk(rel) => {
                 let id = rel.id;
-                self.release_screen.release = Some(rel);
+                self.release_screen.release = Some(*rel);
                 let c = self.client.clone();
                 Command::perform(fetch_types(c, id), |r| match r {
                     Ok(t) => Message::TypesOk(t),

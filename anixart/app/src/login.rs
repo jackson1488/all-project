@@ -1,173 +1,188 @@
-//! Login screen: password, social OAuth through the system browser, and a
-//! direct Anixart session token.
+//! Экран входа: пароль, соцсети через системный браузер, прямой токен сессии и
+//! гостевой пропуск.
 //!
-//! Every method ends in the same place — an Anixart `profileToken.token` — and
-//! the difference is only how the credential is obtained:
+//! Все способы сходятся в одном месте — `profileToken.token` Anixart, — и
+//! отличаются только тем, как этот токен добывают:
 //!
-//! * **Password** — `POST /auth/signIn` (`anixart-core`).
-//! * **Telegram** — OAuth 2.0 + PKCE Login Widget. The app generates the PKCE
-//!   pair, opens `https://oauth.telegram.org/auth` with `xdg-open`, and the user
-//!   pastes back what the browser lands on. Any of these forms works: the full
-//!   `https://app…-login.tg.dev/tglogin?code=…` URL, just the `?code=…` /
-//!   `code=…` query part copied out of the address bar (the code is then
-//!   exchanged for an `id_token` with the PKCE verifier this window generated),
-//!   or an `id_token` obtained elsewhere.
-//! * **VK** — VK ID. The browser is opened on the VK ID authorize URL; the user
-//!   pastes the redirect URL carrying `access_token`, or the token itself.
-//! * **Google** — one click, no token hunting. The Google OAuth web client id
-//!   and the Firebase API key the Anixart APK ships are pre-filled
-//!   (`oauth::GOOGLE_WEB_CLIENT_ID`, `oauth::FIREBASE_API_KEY`), and **“Sign in
-//!   with Google (Browser)”** binds a loopback listener on `127.0.0.1:0`, opens
-//!   the implicit-flow authorize URL against it, catches the redirect the browser
-//!   lands on (a relay page reads the URL fragment and POSTs it back), exchanges
-//!   the Google credential for a **Firebase** ID token through
-//!   `identitytoolkit.googleapis.com` `accounts:signInWithIdp`, and posts that to
-//!   `auth/google`. The paste box stays as the universal fallback and also
-//!   exchanges a raw Google JWT / `ya29…` access token through Firebase when
-//!   Anixart rejects it as a Firebase token.
-//! * **Token** — an already-issued Anixart session token is accepted instantly,
-//!   without any request.
+//! * **Пароль** — `POST /auth/signIn` (`anixart-core`).
+//! * **Telegram** — OAuth 2.0 + PKCE Login Widget. Приложение генерирует пару
+//!   PKCE, открывает `https://oauth.telegram.org/auth` через `xdg-open`, а
+//!   пользователь вставляет обратно то, на что браузер приземлился. Подходят все
+//!   формы: полный `https://app…-login.tg.dev/tglogin?code=…`, только часть
+//!   `?code=…` / `code=…` из адресной строки (код тогда меняется на `id_token`
+//!   с verifier'ом этого окна) или `id_token`, полученный где угодно ещё.
+//! * **VK** — VK ID. Браузер открывается на authorize URL VK ID; вставляют обратно
+//!   редирект с `access_token` или сам токен.
+//! * **Yandex** — Yandex ID, иммитуый поток (`response_type=token`). Клиентский id
+//!   и хост берёт из `anixart_core::oauth`, редирект привязан к Android-пакету,
+//!   поэтому единственный способ вернуть credencial — скопировать адресную строку.
+//! * **Google** — один клик, без поиска токена. Google OAuth web client id и
+//!   Firebase API key, которые возит с собой APK Anixart, уже вписаны
+//!   (`oauth::GOOGLE_WEB_CLIENT_ID`, `oauth::FIREBASE_API_KEY`), и кнопка
+//!   **«Войти через Google (браузер)»** поднимает loopback-слушатель на
+//!   `127.0.0.1:0`, открывает иммитуый authorize URL, ловит редирект (страница
+//!  -релей читает фрагмент URL и отправляет его обратно POST'ом), меняет
+//!   credencial Google на **Firebase** ID token через
+//!   `identitytoolkit.googleapis.com` `accounts:signInWithIdp` и постит его в
+//!   `auth/google`. Поле вставки остаётся универсальным запасным путём.
+//! * **Токен** — уже выпущенный токен сессии принимается мгновенно, без запроса.
 //!
-//! A loopback callback listener is used for Google only: a Google web client id
-//! accepts `http://127.0.0.1:<any port>`. The Telegram / VK redirect hosts
-//! (`app1593901251-login.tg.dev`, `vk54701760://vk.ru/blank.html`) are bound to
-//! the Android package, so a `http://localhost` redirect would be rejected by
-//! those identity providers — copying the URL the browser lands on is the
-//! equivalent, provider-approved fallback there.
+//! * **Гость** — «Продолжить без входа» открывает «Обзор» и «Главную»: ни один
+//!   шельф этих экранов не требует токена, а `favorites` / `watch_list` /
+//!   `history` / `profile` на время гостевого сеанса просто не запрашиваются:
+//!   `App` сверяет `fetch_allowed()` перед каждым вызовом сети.
 //!
-//! Copying, though, is the part that breaks on Linux: **Ctrl+V never reaches an
-//! iced 0.13 `text_input` under Wayland**, because winit 0.30 only speaks the
-//! `zwlr-data-control` clipboard protocol that GNOME and KDE do not implement.
-//! Every paste-back tab therefore carries a **“Paste & Sign In”** button
-//! ([`PasteTarget`]): it pulls the selection in through
-//! [`iced::clipboard::read()`] and, when that comes back empty, through the
-//! `wl-paste` / `xclip` / `xsel` readers in [`crate::net::read_clipboard`] — writes it
-//! into the tab's own field and submits the sign-in in the same step.
+//! Loopback-слушатель нужен только Google: web client id принимает
+//! `http://127.0.0.1:<любой порт>. Хосты редиректа Telegram / VK
+//! (`app1593901251-login.tg.dev`, `vk54701760://vk.ru/blank.html`) привязаны к
+//! Android-пакету, поэтому `http://localhost` они отклонят — копирование URL из
+//! адресной строки там равноценный, одобренный провайдером запасной путь.
+//!
+//! Копирование, впрочем, — то место, где Linux ломается: **Ctrl+V не доходит до
+//! `text_input` в iced 0.13 под Wayland**, потому что winit 0.30 говорит только на
+//! протокол `zwlr-data-control`, которого в GNOME и KDE нет. Поэтому каждая вкладка
+//! со вставкой несёт кнопку **«Вставить и войти»** ([`PasteTarget`]): она тянет
+//! выделение через [`iced::clipboard::read()`], а когда тот отвечает пустотой —
+//! через читалки `wl-paste` / `xclip` / `xsel` из [`crate::net::read_clipboard`],
+//! пишет текст в поле своей вкладки и сразу отправляет вход.
 
 use anixart_core::oauth;
-use iced::widget::{
-    button, container, horizontal_space, scrollable, text, text_input, Column, Row,
-};
-use iced::{Element, Length, Theme};
+use iced::widget::{button, container, scrollable, text_input, Column, Row};
+use iced::{alignment, Element, Length};
 
 use crate::app::Message;
+use crate::theme;
+use crate::widgets;
 
-/// Login methods accepted by the Anixart backend (`AuthApi.java`).
+/// Способы входа, которые принимает backend Anixart (`AuthApi.java`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LoginMethod {
     #[default]
     Password,
     Telegram,
     Vk,
+    Yandex,
     Google,
-    /// Direct session token — instant login, no network call.
+    /// Прямой токен сессии — мгновенный вход, без запроса.
     Token,
 }
 
 impl LoginMethod {
-    /// Every method, in tab order.
-    pub const ALL: [LoginMethod; 5] = [
+    /// Все способы в порядке пилюль.
+    pub const ALL: [LoginMethod; 6] = [
         LoginMethod::Password,
         LoginMethod::Telegram,
         LoginMethod::Vk,
+        LoginMethod::Yandex,
         LoginMethod::Google,
         LoginMethod::Token,
     ];
 
-    /// Tab caption.
+    /// Подпись пилюли.
     pub fn label(self) -> &'static str {
         match self {
-            LoginMethod::Password => "Password",
+            LoginMethod::Password => "Пароль",
             LoginMethod::Telegram => "Telegram",
             LoginMethod::Vk => "VK",
+            LoginMethod::Yandex => "Yandex",
             LoginMethod::Google => "Google",
-            LoginMethod::Token => "Token",
+            LoginMethod::Token => "Токен",
         }
     }
 
-    /// Stable identifier persisted in `session.json`.
+    /// Устойчивый идентификатор, который пишется в `session.json`.
     pub fn as_str(self) -> &'static str {
         match self {
             LoginMethod::Password => "password",
             LoginMethod::Telegram => "telegram",
             LoginMethod::Vk => "vk",
+            LoginMethod::Yandex => "yandex",
             LoginMethod::Google => "google",
             LoginMethod::Token => "token",
         }
     }
 }
 
-/// What the user pasted on the Telegram tab.
+/// Что пользователь вставил на вкладке Telegram.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TelegramPaste {
-    /// A redirect URI: it must be turned into an `id_token` with the PKCE
-    /// verifier the app generated when it opened the browser.
+    /// URI редиректа: его нужно превратить в `id_token` с verifier'ом PKCE,
+    /// который приложение сгенерировало при открытии браузера.
     Redirect(String),
-    /// A ready-made `id_token` — posted straight to `auth/telegram`.
+    /// Готовый `id_token` — уходит прямо в `auth/telegram`.
     IdToken(String),
 }
 
-/// Default redirect URI of the manual (paste-back) Google flow. Google web client
-/// ids accept the loopback origin, and `http://localhost` is the URI
-/// `google-services.json` registers for `default_web_client_id`.
+/// Redirect URI ручной (со вставкой) Google-flow. Web client id Google принимает
+/// loopback-origin, а `http://localhost` — тот URI, который `google-services.json`
+/// регистрирует для `default_web_client_id`.
 pub const GOOGLE_MANUAL_REDIRECT: &str = "http://localhost";
 
-/// Caption of the clipboard button every paste-back tab carries.
-pub const PASTE_BUTTON: &str = "Paste & Sign In";
+/// Подпись кнопки буфера обмена, которая есть на каждой вкладке со вставкой.
+pub const PASTE_BUTTON: &str = "Вставить и войти";
 
-/// Which login field a **“Paste & Sign In”** button feeds.
+/// Язык, по которому выбирается региональный хост Yandex OAuth.
 ///
-/// Ctrl+V is a dead end in an iced 0.13 `text_input` on Wayland, so the selection
-/// is pulled in on demand instead: [`iced::clipboard::read()`] first, the
-/// `wl-paste` / `xclip` / `xsel` readers of [`crate::net::read_clipboard`] when
-/// that yields nothing. The text lands in the tab's own field and the tab's
-/// sign-in is submitted right away.
+/// Интерфейс этого клиента целиком русский, поэтому и вход идёт через
+/// `oauth.yandex.ru` — тот же хост, что SDK даёт устройству с `ru` в локали.
+pub const YANDEX_LANGUAGE: &str = "ru";
+
+/// Какому полю вкладки принадлежит кнопка **«Вставить и войти»**.
+///
+/// Ctrl+V в iced 0.13 `text_input` под Wayland — тупик, поэтому выделение тянется
+/// по требованию: сначала [`iced::clipboard::read()`], затем читалки
+/// `wl-paste` / `xclip` / `xsel` из [`crate::net::read_clipboard`]. Текст попадает
+/// в поле своей вкладки, и вход этой же вкладки сразу отправляется.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PasteTarget {
     Telegram,
     Vk,
+    Yandex,
     Google,
-    /// The direct Anixart session token.
+    /// Прямой токен сессии Anixart.
     Token,
 }
 
 impl PasteTarget {
-    /// Every paste-back tab, in tab order.
-    pub const ALL: [PasteTarget; 4] = [
+    /// Все вкладки со вставкой, в порядке пилюль.
+    pub const ALL: [PasteTarget; 5] = [
         PasteTarget::Telegram,
         PasteTarget::Vk,
+        PasteTarget::Yandex,
         PasteTarget::Google,
         PasteTarget::Token,
     ];
 
-    /// The field the clipboard text is written to.
+    /// Поле, в которое пишется текст буфера.
     pub fn field(self, login: &mut Login) -> &mut String {
         match self {
             PasteTarget::Telegram => &mut login.telegram_paste,
             PasteTarget::Vk => &mut login.vk_paste,
+            PasteTarget::Yandex => &mut login.yandex_paste,
             PasteTarget::Google => &mut login.google_paste,
             PasteTarget::Token => &mut login.token,
         }
     }
 
-    /// The tab this field belongs to, for captions in error messages.
+    /// Вкладка, которой принадлежит поле — для подписи в сообщениях об ошибке.
     pub fn method(self) -> LoginMethod {
         match self {
             PasteTarget::Telegram => LoginMethod::Telegram,
             PasteTarget::Vk => LoginMethod::Vk,
+            PasteTarget::Yandex => LoginMethod::Yandex,
             PasteTarget::Google => LoginMethod::Google,
             PasteTarget::Token => LoginMethod::Token,
         }
     }
 }
 
-/// State of the login screen.
+/// Состояние экрана входа.
 #[derive(Debug)]
 pub struct Login {
     pub method: LoginMethod,
     pub loading: bool,
 
-    // Password
+    // Пароль
     pub username: String,
     pub password: String,
 
@@ -179,21 +194,26 @@ pub struct Login {
     pub vk_verifier: String,
     pub vk_paste: String,
 
-    // Google — the client id and the Firebase API key arrive pre-filled with the
-    // values the Anixart APK ships, so the browser sign-in needs no setup.
+    // Yandex
+    pub yandex_paste: String,
+
+    // Google — client id и Firebase API key приходят уже вписанными значениями,
+    // которые возит с собой APK, поэтому входу через браузер не нужна никакая
+    // подготовка.
     pub google_client_id: String,
     pub firebase_api_key: String,
     pub google_redirect: String,
     pub google_paste: String,
 
-    // Direct token
+    // Прямой токен
     pub token: String,
 }
 
 impl Default for Login {
-    /// Everything empty except the two Google / Firebase identifiers, which are
-    /// the ones the APK ships (`docs/oauth.md` §4). Clearing a field falls back
-    /// to the baked-in constant, so the 1-click button never runs dry.
+    /// Всё пустое, кроме двух идентификаторов Google / Firebase — те берутся из
+    /// констант APK (`docs/oauth.md` §4). Очищенное поле снова падает обратно на
+    /// вшитую константу, поэтому кнопка одного клика никогда не остаётся без
+    /// материала.
     fn default() -> Self {
         Self {
             method: LoginMethod::default(),
@@ -204,6 +224,7 @@ impl Default for Login {
             telegram_paste: String::new(),
             vk_verifier: String::new(),
             vk_paste: String::new(),
+            yandex_paste: String::new(),
             google_client_id: oauth::GOOGLE_WEB_CLIENT_ID.to_owned(),
             firebase_api_key: oauth::FIREBASE_API_KEY.to_owned(),
             google_redirect: String::new(),
@@ -214,8 +235,8 @@ impl Default for Login {
 }
 
 impl Login {
-    /// Telegram authorize URL for the current PKCE material, generating and
-    /// remembering a fresh verifier when none is present.
+    /// Authorize URL Telegram для текущего материала PKCE; генерирует и запоминает
+    /// свежий verifier, когда его нет.
     pub fn prepare_telegram(&mut self) -> String {
         if self.telegram_verifier.is_empty() {
             self.telegram_verifier = match oauth::generate_pkce() {
@@ -232,11 +253,10 @@ impl Login {
         )
     }
 
-    /// VK ID authorize URL (PKCE), generating the verifier when needed.
+    /// Authorize URL VK ID (PKCE), генерируя verifier при необходимости.
     ///
-    /// The vendor SDK adds several extra parameters and performs the code
-    /// exchange itself, so this URL is a convenience: the credential the
-    /// backend wants is the resulting `access_token`.
+    /// SDK провайдера добавляет несколько своих параметров и сам делает обмен кода,
+    /// поэтому этот URL — удобство: backend просит итоговый `access_token`.
     pub fn prepare_vk(&mut self) -> String {
         if self.vk_verifier.is_empty() {
             self.vk_verifier = match oauth::generate_pkce() {
@@ -255,13 +275,26 @@ impl Login {
         )
     }
 
-    /// Google implicit-flow authorize URL for the **manual, paste-back** flow
-    /// (the 1-click button uses the loopback listener instead of this one).
+    /// Authorize URL Yandex ID иммитуого потока.
     ///
-    /// `response_type=token id_token` asks Google for both credentials, so the
-    /// URL the user pastes back carries an `id_token` — or an `access_token` when
-    /// the client id is not enabled for the ID token. Either is exchanged through
-    /// Firebase before it reaches `auth/google`.
+    /// Редирект привязан к Android-пакету (`yx<client_id>.oauth.yandex.ru/auth/
+    /// finish?platform=android`), поэтому в браузере он приземляется на страницу,
+    /// которую нельзя открыть как приложение, — и `access_token` остаётся только
+    /// скопировать из адресной строки. `state` берётся из первых восьми символов
+    /// случайного verifier'а: он нужен провайдеру, но не участвует в обмене.
+    pub fn prepare_yandex(&mut self) -> String {
+        let host = oauth::yandex_host_for_language(YANDEX_LANGUAGE);
+        let state = random_verifier();
+        oauth::yandex_authorize_url(oauth::YANDEX_CLIENT_ID, &host, &state)
+    }
+
+    /// Authorize URL Google иммитуого потока для **ручного** flow со вставкой
+    /// (кнопка одного клика использует вместо него loopback-слушатель).
+    ///
+    /// `response_type=token id_token` просит у Google оба credencila, поэтому URL,
+    /// который вставляют обратно, несёт `id_token` — либо `access_token`, когда
+    /// client id не включён для ID token. Оба меняются через Firebase прежде, чем
+    /// дойдут до `auth/google`.
     pub fn prepare_google(&self) -> String {
         format!(
             "{}?client_id={}&redirect_uri={}&response_type=token%20id_token&scope={}&nonce={}",
@@ -273,19 +306,19 @@ impl Login {
         )
     }
 
-    /// The Google OAuth client id the browser flows use: the edited one when it
-    /// is non-empty, otherwise the id the APK ships.
+    /// Google OAuth client id для браузерных flow: вписанный, когда он непустой,
+    /// иначе — тот, что возит APK.
     pub fn effective_google_client_id(&self) -> String {
         pick(&self.google_client_id, oauth::GOOGLE_WEB_CLIENT_ID)
     }
 
-    /// The Firebase API key the `accounts:signInWithIdp` exchange is authorised
-    /// with, defaulting to the one the APK ships.
+    /// Firebase API key, с которым делается обмен `accounts:signInWithIdp`, —
+    /// по умолчанию тот, что возит APK.
     pub fn effective_firebase_api_key(&self) -> String {
         pick(&self.firebase_api_key, oauth::FIREBASE_API_KEY)
     }
 
-    /// The credential to send for the paste-based flows, if any.
+    /// Credencial для flow со вставкой, если он есть.
     pub fn telegram_credential(&self) -> Option<TelegramPaste> {
         classify_telegram_paste(&self.telegram_paste)
     }
@@ -294,253 +327,319 @@ impl Login {
         vk_access_token(&self.vk_paste)
     }
 
-    pub fn google_credential(&self) -> Option<String> {
-        google_id_token(&self.google_paste)
+    /// Yandex OAuth access token: из редиректа с `access_token=` или из голого
+    /// вставленного значения — тот же разбор, что у VK ID.
+    pub fn yandex_credential(&self) -> Option<String> {
+        vk_access_token(&self.yandex_paste)
     }
 
+    /// Экран входа: заголовок, ряд пилюль способов, форма способа и гостевой
+    /// пропуск внизу.
     pub fn view(&self) -> Element<'_, Message> {
-        let theme: fn(&Theme, button::Status) -> button::Style = button::primary;
-        let ghost: fn(&Theme, button::Status) -> button::Style = button::secondary;
-
-        let mut tabs = Row::new().spacing(8);
         let current = self.method;
-        for method in LoginMethod::ALL {
-            let active = method == current;
-            tabs = tabs.push(
-                button(text(method.label()).size(15))
-                    .style(if active { theme } else { ghost })
-                    .padding(10)
-                    .on_press_maybe((!active && !self.loading).then_some(Message::LoginTab(method))),
-            );
-        }
+        let pills = LoginMethod::ALL.iter().fold(Row::new().spacing(8), |row, method| {
+            row.push(widgets::pill(
+                method.label().to_owned(),
+                *method == current,
+                Message::LoginTab(*method),
+            ))
+        });
 
-        let body = match current {
+        let form = match current {
             LoginMethod::Password => self.password_form(),
             LoginMethod::Telegram => self.telegram_form(),
             LoginMethod::Vk => self.vk_form(),
+            LoginMethod::Yandex => self.yandex_form(),
             LoginMethod::Google => self.google_form(),
             LoginMethod::Token => self.token_form(),
         };
 
-        container(
-            scrollable(
-                Column::new()
-                    .spacing(16)
-                    .max_width(560)
-                    .push(text("Anixart").size(30))
-                    .push(
-                        text("Sign in to reach your feed and collections")
-                            .size(14)
-                            .color([0.6, 0.6, 0.7]),
-                    )
-                    .push(tabs)
-                    .push(body),
-            )
-            .height(Length::Fill),
-        )
-        .center_x(Length::Fill)
-        .padding(12)
-        .into()
+        let body = Column::new()
+            .spacing(14)
+            .push(widgets::headline("Anixart".to_owned()))
+            .push(widgets::muted(
+                "Войдите, чтобы увидеть свои закладки, историю серий и профиль. \
+                 Каталог и лента читаются и без входа."
+                    .to_owned(),
+            ))
+            .push(widgets::section("Войти с помощью".to_owned(), pills.wrap().into()))
+            .push(form)
+            .push(widgets::divider())
+            .push(
+                Row::new()
+                    .spacing(10)
+                    .align_y(alignment::Vertical::Center)
+                    .push(widgets::action(
+                        "Продолжить без входа",
+                        (!self.loading).then_some(Message::GuestSkip),
+                    ))
+                    .push(widgets::muted(
+                        "Гость видит «Главную» и «Обзор»; закладки и профиль \
+                         останутся закрытыми до входа."
+                            .to_owned(),
+                    )),
+            );
+
+        container(scrollable(body).height(Length::Fill).max_width(620))
+            .width(Length::Fill)
+            .center_x(Length::Fill)
+            .padding(20)
+            .into()
     }
 
     fn password_form(&self) -> Element<'_, Message> {
-        let username = text_input("Username or e-mail", &self.username)
-            .on_input(Message::LoginUsername)
-            .on_submit(Message::LoginSubmit)
-            .padding(10);
-        let password = text_input("Password", &self.password)
-            .secure(true)
-            .on_input(Message::LoginPassword)
-            .on_submit(Message::LoginSubmit)
-            .padding(10);
-
         Column::new()
             .spacing(10)
-            .push(username)
-            .push(password)
-            .push(self.submit("Login", Message::LoginSubmit))
+            .push(widgets::muted(
+                "Логин или e-mail и пароль профиля Anixart — запрос уходит на \
+                 auth/signin."
+                    .to_owned(),
+            ))
+            .push(self.field("Логин или e-mail", &self.username, Message::LoginUsername))
+            .push(self.secret("Пароль", &self.password, Message::LoginPassword))
+            .push(self.submit("Войти", Message::LoginSubmit))
             .into()
     }
 
     fn telegram_form(&self) -> Element<'_, Message> {
         Column::new()
             .spacing(10)
-            .push(clipboard_note(
-                "Ctrl+V does not work in this window (iced 0.13 on Wayland): after confirming \
-                 in Telegram, copy the whole address bar URL — app1593901251-login.tg.dev/tglogin?code=… \
-                 — and press “Paste & Sign In”. “Return to app” is an Android-only link, so it \
-                 does nothing on desktop; the address bar is all you need.",
+            .push(widgets::note(
+                "Ctrl+V в этом окне не работает (iced 0.13 под Wayland): подтвердите \
+                 вход в Telegram, скопируйте весь URL из адресной строки — \
+                 app1593901251-login.tg.dev/tglogin?code=… — и нажмите «Вставить и \
+                 войти». Кнопка «Вернуться в приложение» нужна только Android, на \
+                 десктопе она ничего не делает; адресная строка — всё, что нужно."
+                    .to_owned(),
+                widgets::Tone::Warn,
             ))
-            .push(hint(
-                "1. Open the Telegram login in your browser and allow the app. \
-                 2. After confirming, the browser lands on \
-                 https://app1593901251-login.tg.dev/tglogin?code=… — even when that \
-                 page looks blank, fails to load or immediately redirects, the address \
-                 bar holds what is needed. \
-                 3. Paste it below: the whole URL, or only the ?code=… / code=… part, \
-                 both work — the code is exchanged for an id_token with the PKCE \
-                 verifier this window generated. A raw Telegram id_token obtained \
-                 elsewhere is accepted as well.",
+            .push(widgets::muted(
+                "1. Откройте вход Telegram в браузере и разрешите приложению доступ. \
+                 2. После подтверждения браузер попадёт на \
+                 https://app1593901251-login.tg.dev/tglogin?code=… — даже если \
+                 страница выглядит пустой, не загружается или сразу перенаправляет \
+                 дальше, в адресной строке есть нужное. \
+                 3. Вставьте это ниже: подходит весь URL или только часть ?code=… / \
+                 code=… — код меняется на id_token с verifier'ом PKCE, который \
+                 сгенерировало это окно. Готовый id_token Telegram тоже принимается."
+                    .to_owned(),
             ))
-            .push(button("Open Telegram login in browser")
-                .width(Length::Fill)
-                .padding(10)
-                .on_press(Message::LoginTelegramOpen))
-            .push(text_input("Redirect URL, ?code=… or Telegram id_token", &self.telegram_paste)
-                .on_input(Message::LoginTelegramPaste)
-                .on_submit(Message::LoginTelegramSubmit)
-                .padding(10))
+            .push(self.wide("Открыть вход Telegram в браузере", Message::LoginTelegramOpen))
+            .push(self.field(
+                "URL редиректа, ?code=… или id_token Telegram",
+                &self.telegram_paste,
+                Message::LoginTelegramPaste,
+            ))
             .push(self.paste_button(PasteTarget::Telegram))
-            .push(self.submit("Continue with Telegram", Message::LoginTelegramSubmit))
+            .push(self.submit("Продолжить с Telegram", Message::LoginTelegramSubmit))
             .into()
     }
 
     fn vk_form(&self) -> Element<'_, Message> {
         Column::new()
             .spacing(10)
-            .push(clipboard_note(
-                "Ctrl+V does not work in this window (iced 0.13 on Wayland): copy the \
-                 redirect URL in the browser and press “Paste & Sign In” instead.",
+            .push(widgets::note(
+                "Ctrl+V в этом окне не работает (iced 0.13 под Wayland): скопируйте \
+                 URL редиректа в браузере и нажмите «Вставить и войти»."
+                    .to_owned(),
+                widgets::Tone::Warn,
             ))
-            .push(hint(
-                "Open VK ID in the browser and paste the URL it redirects to \
-                 (it carries access_token=…), or paste a VK ID access token with \
-                 scope email obtained from any VK ID client.",
+            .push(widgets::muted(
+                "Откройте VK ID в браузере и вставьте URL, на который он перенаправит \
+                 (в нём есть access_token=…), или токен доступа VK ID со скоупом \
+                 email, полученный в любом клиенте VK ID."
+                    .to_owned(),
             ))
-            .push(button("Open VK ID login in browser")
-                .width(Length::Fill)
-                .padding(10)
-                .on_press(Message::LoginVkOpen))
-            .push(text_input("Redirect URL or VK access token", &self.vk_paste)
-                .on_input(Message::LoginVkPaste)
-                .on_submit(Message::LoginVkSubmit)
-                .padding(10))
+            .push(self.wide("Открыть вход VK ID в браузере", Message::LoginVkOpen))
+            .push(self.field(
+                "URL редиректа или токен доступа VK",
+                &self.vk_paste,
+                Message::LoginVkPaste,
+            ))
             .push(self.paste_button(PasteTarget::Vk))
-            .push(self.submit("Continue with VK", Message::LoginVkSubmit))
+            .push(self.submit("Продолжить с VK", Message::LoginVkSubmit))
+            .into()
+    }
+
+    fn yandex_form(&self) -> Element<'_, Message> {
+        Column::new()
+            .spacing(10)
+            .push(widgets::note(
+                "Ctrl+V в этом окне не работает (iced 0.13 под Wayland): скопируйте \
+                 адресную строку после подтверждения в Yandex ID и нажмите \
+                 «Вставить и войти»."
+                    .to_owned(),
+                widgets::Tone::Warn,
+            ))
+            .push(widgets::muted(
+                "Yandex ID отдаёт токен иммитуым потоком (`response_type=token`), а \
+                 его redirect URI привязан к Android-пакету \
+                 (`yxa980f005…\.oauth.yandex.ru/auth/finish`), поэтому браузер \
+                 приземляется туда без полезной страницы. Скопируйте весь URL — в \
+                 нём будет `access_token=…` — или вставьте сам токен напрямую; оба \
+                 варианта уходят в auth/yandex."
+                    .to_owned(),
+            ))
+            .push(self.wide("Открыть вход Yandex ID в браузере", Message::LoginYandexOpen))
+            .push(self.field(
+                "URL редиректа или access_token Yandex",
+                &self.yandex_paste,
+                Message::LoginYandexPaste,
+            ))
+            .push(self.paste_button(PasteTarget::Yandex))
+            .push(self.submit("Продолжить с Yandex", Message::LoginYandexSubmit))
             .into()
     }
 
     fn google_form(&self) -> Element<'_, Message> {
-        let primary: fn(&Theme, button::Status) -> button::Style = button::primary;
-
         Column::new()
             .spacing(10)
-            .push(hint(
-                "One click is enough — nothing to look up. The Google client id and the \
-                 Firebase API key below are the ones the Anixart APK ships. \
-                 “Sign in with Google (Browser)” listens on a local loopback port, opens \
-                 Google in the browser, picks the credential out of the redirect it lands \
-                 on, exchanges it for a Firebase ID token (identitytoolkit \
-                 accounts:signInWithIdp) and signs in through auth/google automatically.",
+            .push(widgets::muted(
+                "Достаточно одного клика — ничего искать не нужно. Client id Google \
+                 и Firebase API key ниже — те самые, что возит с собой APK Anixart. \
+                 «Войти через Google (браузер)» слушает локальный порт, открывает \
+                 Google в браузере, забирает credencial из редиректа, на который тот \
+                 приземлится, меняет его на Firebase ID token (identitytoolkit \
+                 accounts:signInWithIdp) и входит через auth/google сам."
+                    .to_owned(),
             ))
-            .push(
-                button(text("Sign in with Google (Browser)").size(15))
-                    .width(Length::Fill)
-                    .padding(12)
-                    .style(primary)
-                    .on_press_maybe((!self.loading).then_some(Message::LoginGoogleBrowser)),
-            )
-            .push(hint(
-                "Fallback: paste the redirect URL the browser lands on (it carries \
-                 id_token=… or access_token=…) or any Google / Firebase token. A raw \
-                 Google JWT or ya29… access token is exchanged through Firebase on its \
-                 own if Anixart rejects it. Only edit the two identifiers below if the \
-                 shipped ones ever stop working.",
+            .push(self.wide_accent(
+                "Войти через Google (браузер)",
+                (!self.loading).then_some(Message::LoginGoogleBrowser),
             ))
-            .push(text_input("Google OAuth client id (pre-filled from the APK)", &self.google_client_id)
-                .on_input(Message::LoginGoogleClientId)
-                .padding(10))
-            .push(text_input("Firebase API key (pre-filled from the APK)", &self.firebase_api_key)
-                .on_input(Message::LoginFirebaseKey)
-                .padding(10))
-            .push(text_input("Redirect URI for the manual flow (optional, default http://localhost)", &self.google_redirect)
-                .on_input(Message::LoginGoogleRedirect)
-                .padding(10))
-            .push(button("Open Google login in browser (manual, paste-back)")
-                .width(Length::Fill)
-                .padding(10)
-                .on_press(Message::LoginGoogleOpen))
-            .push(text_input("Redirect URL or (Firebase) id_token", &self.google_paste)
-                .on_input(Message::LoginGooglePaste)
-                .on_submit(Message::LoginGoogleSubmit)
-                .padding(10))
+            .push(widgets::note(
+                "Запасной путь: вставьте URL редиректа (в нём id_token=… или \
+                 access_token=…) или любой токен Google / Firebase. Голый JWT Google \
+                 или ya29… меняется через Firebase сам, если Anixart его отвергнет. \
+                 Два идентификатора ниже правьте только тогда, когда вшитые \
+                 перестанут работать."
+                    .to_owned(),
+                widgets::Tone::Info,
+            ))
+            .push(self.field(
+                "Google OAuth client id (вписан из APK)",
+                &self.google_client_id,
+                Message::LoginGoogleClientId,
+            ))
+            .push(self.field(
+                "Firebase API key (вписан из APK)",
+                &self.firebase_api_key,
+                Message::LoginFirebaseKey,
+            ))
+            .push(self.field(
+                "Redirect URI ручного flow (необязательно, по умолчанию http://localhost)",
+                &self.google_redirect,
+                Message::LoginGoogleRedirect,
+            ))
+            .push(self.wide("Открыть Google в браузере (вручную, со вставкой)", Message::LoginGoogleOpen))
+            .push(self.field(
+                "URL редиректа или (Firebase) id_token",
+                &self.google_paste,
+                Message::LoginGooglePaste,
+            ))
             .push(self.paste_button(PasteTarget::Google))
-            .push(self.submit("Continue with Google", Message::LoginGoogleSubmit))
+            .push(self.submit("Продолжить с Google", Message::LoginGoogleSubmit))
             .into()
     }
 
     fn token_form(&self) -> Element<'_, Message> {
         Column::new()
             .spacing(10)
-            .push(hint(
-                "Paste an existing Anixart session token (profileToken.token) to log in \
-                 instantly. It is saved to ~/.config/anixart-linux/session.json and reused \
-                 on the next start.",
+            .push(widgets::muted(
+                "Вставьте существующий токен сессии Anixart (profileToken.token) — \
+                 вход произойдёт мгновенно, без запроса. Он сохранится в \
+                 ~/.config/anixart-linux/session.json и будет использован при \
+                 следующем запуске."
+                    .to_owned(),
             ))
-            .push(text_input("Anixart session token", &self.token)
-                .on_input(Message::LoginTokenPaste)
-                .on_submit(Message::LoginTokenSubmit)
-                .padding(10))
+            .push(self.field("Токен сессии Anixart", &self.token, Message::LoginTokenPaste))
             .push(self.paste_button(PasteTarget::Token))
-            .push(self.submit("Use this token", Message::LoginTokenSubmit))
+            .push(self.submit("Использовать этот токен", Message::LoginTokenSubmit))
             .into()
     }
 
-    fn submit(&self, label: &'static str, message: Message) -> Element<'_, Message> {
-        if self.loading {
-            return button(text("Working…").size(14))
-                .width(Length::Fill)
-                .padding(10)
-                .into();
-        }
-        button(text(label).size(14))
+    /// Округлое текстовое поле в стиле темы.
+    fn field(&self, placeholder: &str, value: &str, on_input: fn(String) -> Message) -> Element<'_, Message> {
+        text_input(placeholder, value)
+            .on_input(on_input)
+            .padding(12)
+            .style(theme::styles::input)
+            .into()
+    }
+
+    /// То же, но Enter отправляет вход.
+    fn secret(
+        &self,
+        placeholder: &str,
+        value: &str,
+        on_input: fn(String) -> Message,
+    ) -> Element<'_, Message> {
+        text_input(placeholder, value)
+            .secure(true)
+            .on_input(on_input)
+            .on_submit(Message::LoginSubmit)
+            .padding(12)
+            .style(theme::styles::input)
+            .into()
+    }
+
+    /// Широкая кнопка на всю ширину формы.
+    fn wide(&self, caption: &str, message: Message) -> Element<'_, Message> {
+        button(widgets::button_label(caption.to_owned(), 15))
             .width(Length::Fill)
-            .padding(10)
+            .padding([12, 18])
+            .style(theme::styles::ghost)
+            .on_press_maybe((!self.loading).then_some(message))
+            .into()
+    }
+
+    /// Широкая акцентная кнопка — главный клик вкладки.
+    fn wide_accent(&self, caption: &str, message: Option<Message>) -> Element<'_, Message> {
+        button(widgets::button_label(caption.to_owned(), 15))
+            .width(Length::Fill)
+            .padding([12, 18])
+            .style(theme::styles::accent)
+            .on_press_maybe(message)
+            .into()
+    }
+
+    /// Главная кнопка вкладки: во время входа она становится неактивной подписью.
+    fn submit(&self, caption: &str, message: Message) -> Element<'_, Message> {
+        if self.loading {
+            return widgets::busy("Вход выполняется…");
+        }
+        button(widgets::button_label(caption.to_owned(), 15))
+            .width(Length::Fill)
+            .padding([12, 18])
+            .style(theme::styles::accent)
             .on_press(message)
             .into()
     }
 
-    /// **“Paste & Sign In”** — reads the selection and submits this tab with it,
-    /// so a keyboard paste is never needed. Inert while a sign-in is in flight,
-    /// exactly like [`Login::submit`].
+    /// **«Вставить и войти»** — читает выделение и сразу отправляет эту вкладку,
+    /// поэтому клавиатурная вставка больше не нужна. Во время входа бездействует,
+    /// как и [`Login::submit`].
     fn paste_button(&self, target: PasteTarget) -> Element<'_, Message> {
-        button(text(PASTE_BUTTON).size(14))
+        button(widgets::button_label(PASTE_BUTTON.to_owned(), 14))
             .width(Length::Fill)
-            .padding(10)
+            .padding([10, 18])
+            .style(theme::styles::pill)
             .on_press_maybe((!self.loading).then_some(Message::LoginClipboard(target)))
             .into()
     }
 }
 
-fn hint(text_: &str) -> Element<'_, Message> {
-    Row::new()
-        .spacing(10)
-        .push(text(text_).size(13).color([0.62, 0.66, 0.78]))
-        .push(horizontal_space())
-        .into()
-}
-
-/// The one-line warning that explains the clipboard button: Ctrl+V never lands
-/// in an iced 0.13 `text_input` under Wayland.
-fn clipboard_note(text_: &str) -> Element<'_, Message> {
-    Row::new()
-        .spacing(10)
-        .push(text(text_).size(13).color([0.95, 0.8, 0.45]))
-        .push(horizontal_space())
-        .into()
-}
-
-/// Restores the `https://` a browser's address bar hides, so a URL copied without
-/// its scheme still parses. A bare token, or a lone `?code=…` / `code=…` query,
-/// is left exactly as it came.
+/// Восстанавливает `https://`, которое адресная строка браузера скрывает, чтобы URL,
+/// скопированный без схемы, всё же разбирался. Голый токен или одиночная часть
+/// `?code=…` / `code=…` остаются ровно теми, чем пришли.
 fn with_scheme(input: &str) -> String {
     let input = input.trim();
     if input.contains("://") {
         return input.to_owned();
     }
 
-    // Only a `host/path`-shaped input is a URL: the host carries a dot, and
-    // something follows it.
+    // URL — только ввод формы `host/path`: в хосте есть точка, и после него что-то
+    // следует.
     let host = input.split(['/', '?', '#']).next().unwrap_or(input);
     if input.contains(['/', '?', '#']) && host.contains('.') {
         return format!("https://{input}");
@@ -548,27 +647,30 @@ fn with_scheme(input: &str) -> String {
     input.to_owned()
 }
 
-/// Distinguishes a pasted redirect URI from a bare Telegram `id_token`.
+/// Отличает вставленный URI редиректа от голого Telegram `id_token`.
 pub fn classify_telegram_paste(input: &str) -> Option<TelegramPaste> {
     let input = input.trim();
     if input.is_empty() {
         return None;
     }
-    // `tg://login?code=…` and the https redirect both count as a redirect URI.
+    // `tg://login?code=…` и https-редирект считаются URI редиректа.
     if input.contains("://") || input.contains("code=") {
         return Some(TelegramPaste::Redirect(with_scheme(input)));
     }
     Some(TelegramPaste::IdToken(input.to_owned()))
 }
 
-/// Pulls a VK ID access token out of a pasted redirect URL or the token itself.
+/// Вытаскивает access token из вставленного URL редиректа или из самого токена.
+///
+/// Работает и для VK ID, и для Yandex ID: оба провайдера отдают иммитуый или
+/// code-редирект, у которого токен лежит в `access_token=` (в query или в
+/// фрагменте), а голый ввод — это уже сам токен.
 pub fn vk_access_token(input: &str) -> Option<String> {
     let input = input.trim();
     if input.is_empty() {
         return None;
     }
-    // A redirect copied straight out of the address bar may be missing its
-    // scheme; a bare token must stay untouched.
+    // URL из адресной строки может быть без схемы; голый трогать нельзя.
     let input = if input.contains("access_token=") {
         with_scheme(input)
     } else {
@@ -580,21 +682,21 @@ pub fn vk_access_token(input: &str) -> Option<String> {
     Some(input)
 }
 
-/// Pulls a Google / Firebase ID token out of a pasted redirect URL, a bare
-/// fragment (`#id_token=…`) or the token itself.
+/// Вытаскивает Google / Firebase ID token из URL редиректа, голого фрагмента
+/// (`#id_token=…`) или из самого токена.
 pub fn google_id_token(input: &str) -> Option<String> {
     google_credential_from(input).map(|(token, _)| token)
 }
 
-/// Splits whatever the Google flow produced into the credential Firebase
-/// consumes plus the `postBody` key it belongs to.
+/// Разбирает всё, что породил Google-flow, на credencial для Firebase плюс ключ
+/// `postBody`, в котором он пришёл.
 ///
-/// Accepted inputs: the full redirect URL the browser lands on (query *or*
-/// fragment), a lone fragment / query string handed over by the loopback relay
-/// page, and a bare token — a three-segment JWT is treated as an already-signed
-/// ID token, anything else (`ya29.…`) as an OAuth access token.
+/// Принимаются: полный URL редиректа (query *или* фрагмент), одиночный фрагмент /
+/// query, который отдал loopback-релей, и голый токен — JWT из трёх сегментов
+/// считается уже подписанным ID token, всё остальное (`ya29.…`) — OAuth access
+/// token.
 ///
-/// `None` when the input carries only an OAuth error or no credential at all.
+/// `None`, когда ввод несёт только ошибку OAuth или не несёт credencial вовсе.
 pub fn google_credential_from(input: &str) -> Option<(String, bool)> {
     let input = input.trim();
     if input.is_empty() {
@@ -613,7 +715,7 @@ pub fn google_credential_from(input: &str) -> Option<(String, bool)> {
     if let Some(token) = lookup("access_token") {
         return Some((token, true));
     }
-    // A landing page that only carries `error=…` (or nothing) is not a credential.
+    // Страница, у которой только `error=…` (или ничего), — не credencial.
     if input.contains("error=") || (input.contains("://") && !input.contains('=')) {
         return None;
     }
@@ -623,8 +725,8 @@ pub fn google_credential_from(input: &str) -> Option<(String, bool)> {
     ))
 }
 
-/// Reason Google gave for refusing the sign-in, read out of a callback redirect
-/// (`#error=access_denied&error_description=…`). `None` on a successful landing.
+/// Причина, по которой Google отверг вход, из редиректа колбэка
+/// (`#error=access_denied&error_description=…`). `None` на успешной посадке.
 pub fn google_callback_error(payload: &str) -> Option<String> {
     let payload = payload.trim();
     if payload.is_empty() {
@@ -640,8 +742,8 @@ pub fn google_callback_error(payload: &str) -> Option<String> {
     lookup("error_description").or_else(|| lookup("error"))
 }
 
-/// `value` trimmed, or `fallback` when it is blank — so a cleared identifier field
-/// still produces a working browser flow.
+/// `value` без пробелов, либо `fallback`, когда поле пусто — так очищенный
+/// идентификатор всё равно даёт рабочий браузерный flow.
 fn pick(value: &str, fallback: &str) -> String {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -651,8 +753,8 @@ fn pick(value: &str, fallback: &str) -> String {
     }
 }
 
-/// Reads `key` out of a bare query / fragment payload (`#id_token=…&state=…`,
-/// `?code=…`, `code=…`) by rebuilding it as a URL.
+/// Читает `key` из голого query / фрагмента (`#id_token=…&state=…`, `?code=…`,
+/// `code=…`), собрав его обратно как URL.
 fn param_in_pairs(pairs: &str, key: &str) -> Option<String> {
     let query = pairs.trim_start_matches(['#', '?', '&']);
     let url = reqwest::Url::parse(&format!("https://anixart.invalid/?{query}")).ok()?;
@@ -660,8 +762,8 @@ fn param_in_pairs(pairs: &str, key: &str) -> Option<String> {
     Some(value.into_owned())
 }
 
-/// Reads `key` from the query string, falling back to the URL fragment
-/// (the OAuth implicit flow carries its parameters there).
+/// Читает `key` из query, падая обратно на фрагмент URL (иммитуый OAuth flow носит
+/// параметры там).
 fn param_in_url(url: &str, key: &str) -> Option<String> {
     let parsed = reqwest::Url::parse(url).ok()?;
     if let Some((_, value)) = parsed.query_pairs().find(|(name, _)| name == key) {
@@ -673,10 +775,10 @@ fn param_in_url(url: &str, key: &str) -> Option<String> {
     Some(value.into_owned())
 }
 
-/// Fallback PKCE material / OAuth nonce when the OS RNG wrapper is unavailable.
+/// Запасной материал PKCE / nonce OAuth, когда обёртка над ОС-RNG недоступна.
 ///
-/// An atomic counter is mixed into the clock so two calls in the same
-/// nanosecond still differ.
+/// В часы атомический счётчик, чтобы два вызова в одну наносекунду всё равно
+/// различались.
 pub(crate) fn random_verifier() -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -707,8 +809,61 @@ mod tests {
     #[test]
     fn methods_cover_the_auth_api() {
         let labels: Vec<&str> = LoginMethod::ALL.iter().map(|m| m.as_str()).collect();
-        assert_eq!(labels, ["password", "telegram", "vk", "google", "token"]);
+        assert_eq!(labels, ["password", "telegram", "vk", "yandex", "google", "token"]);
         assert_eq!(LoginMethod::default(), LoginMethod::Password);
+
+        // каждая пилюля подписана по-русски или именем провайдера
+        let captions: Vec<&str> = LoginMethod::ALL.iter().map(|m| m.label()).collect();
+        assert_eq!(captions, ["Пароль", "Telegram", "VK", "Yandex", "Google", "Токен"]);
+    }
+
+    #[test]
+    fn yandex_authorize_url_is_the_implicit_flow_on_the_ru_host() {
+        let mut login = Login::default();
+        let url = login.prepare_yandex();
+
+        assert!(
+            url.starts_with("https://oauth.yandex.ru/authorize?response_type=token"),
+            "{url}"
+        );
+        assert!(url.contains(&format!("client_id={}", oauth::YANDEX_CLIENT_ID)), "{url}");
+        assert!(url.contains("redirect_uri=https%3A%2F%2Fyx"), "{url}");
+        assert!(url.contains("platform%3Dandroid"), "{url}");
+        assert!(url.contains("&force_confirm=true&origin=android"), "{url}");
+
+        // state обязателен провайдеру и отличается от запуска к запуску
+        assert!(url.contains("&state="), "{url}");
+        let again = login.prepare_yandex();
+        assert_ne!(url, again);
+    }
+
+    #[test]
+    fn yandex_token_comes_from_the_redirect_or_the_paste() {
+        assert_eq!(
+            vk_access_token("https://yxa980f005.oauth.yandex.ru/auth/finish?platform=android"),
+            None,
+            "a redirect without a token is not a credential"
+        );
+        assert_eq!(
+            vk_access_token(
+                "https://yxa980f005.oauth.yandex.ru/auth/finish?platform=android&access_token=YAN.123&expires_in=3600"
+            )
+            .as_deref(),
+            Some("YAN.123")
+        );
+        assert_eq!(
+            vk_access_token("yxa980f005.oauth.yandex.ru/auth/finish?access_token=FRA").as_deref(),
+            Some("FRA"),
+            "the address bar hides the scheme"
+        );
+        assert_eq!(vk_access_token("ya29.plain").as_deref(), Some("ya29.plain"));
+        assert_eq!(vk_access_token(""), None);
+
+        let mut login = Login::default();
+        login.yandex_paste = "https://yxa980f005.oauth.yandex.ru/auth/finish?access_token=TOK".into();
+        assert_eq!(login.yandex_credential().as_deref(), Some("TOK"));
+        login.yandex_paste = "  ".into();
+        assert_eq!(login.yandex_credential(), None);
     }
 
     #[test]
@@ -738,8 +893,7 @@ mod tests {
             Some("VK123")
         );
         assert_eq!(
-            vk_access_token("vk54701760://vk.ru/blank.html#access_token=FRA&state=s")
-                .as_deref(),
+            vk_access_token("vk54701760://vk.ru/blank.html#access_token=FRA&state=s").as_deref(),
             Some("FRA")
         );
         assert_eq!(vk_access_token("PLAIN").as_deref(), Some("PLAIN"));
@@ -764,17 +918,17 @@ mod tests {
 
     #[test]
     fn google_credentials_carry_their_postbody_kind() {
-        // A signed redirect is an id_token → `postBody: id_token=…`.
+        // Подписанный редирект — это id_token → `postBody: id_token=…`.
         assert_eq!(
             google_credential_from("https://localhost/#id_token=GOOG.JWT.tok&expires_in=3600"),
             Some(("GOOG.JWT.tok".to_owned(), false))
         );
-        // Only an access token came back → `postBody: access_token=…`.
+        // Вернулся только access token → `postBody: access_token=…`.
         assert_eq!(
             google_credential_from("#access_token=ya29.a0AfB&token_type=Bearer"),
             Some(("ya29.a0AfB".to_owned(), true))
         );
-        // The loopback relay page posts the fragment without its leading `#`.
+        // Loopback-релей постит фрагмент без ведущего `#`.
         assert_eq!(
             google_credential_from("id_token=FB.JWT.tok&scope=openid%20email"),
             Some(("FB.JWT.tok".to_owned(), false))
@@ -783,7 +937,7 @@ mod tests {
             google_credential_from("?access_token=ya29.abc"),
             Some(("ya29.abc".to_owned(), true))
         );
-        // Bare tokens are classified by shape.
+        // Голые токены классифицируются по форме.
         assert_eq!(
             google_credential_from("eyJhbGciOiJSUzI1NiJ9.eyJhdWQiOiIxIn0.sig"),
             Some(("eyJhbGciOiJSUzI1NiJ9.eyJhdWQiOiIxIn0.sig".to_owned(), false))
@@ -792,7 +946,7 @@ mod tests {
             google_credential_from("ya29.a0AfB_byC"),
             Some(("ya29.a0AfB_byC".to_owned(), true))
         );
-        // An OAuth error carries no credential.
+        // Ошибка OAuth — не credencial.
         assert_eq!(
             google_credential_from("https://localhost/#error=access_denied&error_description=User%20cancelled"),
             None
@@ -810,7 +964,6 @@ mod tests {
             .as_deref(),
             Some("User cancelled")
         );
-        // fragment-only payload, without the error_description detail
         assert_eq!(
             google_callback_error("#error=invalid_request").as_deref(),
             Some("invalid_request")
@@ -819,7 +972,6 @@ mod tests {
             google_callback_error("?error=access_denied").as_deref(),
             Some("access_denied")
         );
-        // a successful landing has no error
         assert_eq!(google_callback_error("#id_token=FB.JWT.tok"), None);
         assert_eq!(google_callback_error(""), None);
     }
@@ -827,7 +979,7 @@ mod tests {
     #[test]
     fn google_identifiers_default_to_the_apk_values() {
         let mut login = Login::default();
-        // Pre-filled from `anixart_core::oauth`, so no token hunting is needed.
+        // Уже вписаны из `anixart_core::oauth`, поэтому токен искать не нужно.
         assert_eq!(login.google_client_id, oauth::GOOGLE_WEB_CLIENT_ID);
         assert_eq!(login.firebase_api_key, oauth::FIREBASE_API_KEY);
 
@@ -839,14 +991,14 @@ mod tests {
         assert!(url.contains("&redirect_uri=http%3A%2F%2Flocalhost&response_type=token%20id_token"));
         assert!(url.contains("&scope=openid%20email%20profile&nonce="));
 
-        // Clearing a field falls back to the baked-in constant.
+        // Очищенное поле падает обратно на вшитую константу.
         login.google_client_id.clear();
         login.firebase_api_key.clear();
         assert_eq!(login.effective_google_client_id(), oauth::GOOGLE_WEB_CLIENT_ID);
         assert_eq!(login.effective_firebase_api_key(), oauth::FIREBASE_API_KEY);
         assert!(login.prepare_google().contains("client_id=983926366374"));
 
-        // An explicit override wins, and so does a custom redirect URI.
+        // Явная подмена сильнее, как и свой redirect URI.
         login.google_client_id = "my-own.client.id".into();
         login.firebase_api_key = "AIzaMyOwnKey".into();
         login.google_redirect = "https://example.invalid/cb".into();
@@ -858,8 +1010,8 @@ mod tests {
 
     #[test]
     fn telegram_accepts_a_bare_code_paste() {
-        // The tg.dev page is often blank / redirects, so only the address bar
-        // query is copyable — that has to work as well as the full URL.
+        // Страница tg.dev часто пуста / перенаправляет, поэтому копируется только
+        // query адресной строки — и он обязан работать.
         assert_eq!(
             classify_telegram_paste("?code=abc123&state=xyz"),
             Some(TelegramPaste::Redirect("?code=abc123&state=xyz".into()))
@@ -868,7 +1020,6 @@ mod tests {
             classify_telegram_paste("code=abc123"),
             Some(TelegramPaste::Redirect("code=abc123".into()))
         );
-        // A raw id_token still goes straight to auth/telegram.
         let jwt = "eyJhbGciOiJSUzI1NiJ9.eyJhdWQiOiIxIn0.signature";
         assert_eq!(classify_telegram_paste(jwt), Some(TelegramPaste::IdToken(jwt.into())));
     }
@@ -881,7 +1032,8 @@ mod tests {
         assert!(url.contains("&code_challenge_method=S256"));
         assert!(!login.telegram_verifier.is_empty());
 
-        // The verifier is reused, so the same challenge survives a re-open.
+        // Verifier живёт дальше, поэтому тот же challenge переживает повторное
+        // открытие.
         let again = login.prepare_telegram();
         assert_eq!(url, again);
 
@@ -916,17 +1068,18 @@ mod tests {
 
         assert_eq!(login.telegram_paste, "clip-telegram");
         assert_eq!(login.vk_paste, "clip-vk");
+        assert_eq!(login.yandex_paste, "clip-yandex");
         assert_eq!(login.google_paste, "clip-google");
         assert_eq!(login.token, "clip-token");
 
-        // Every target is a paste-back tab, never the password one.
+        // Каждая цель — вкладка со вставкой, пароля среди них нет.
         assert!(PasteTarget::ALL.iter().all(|t| t.method() != LoginMethod::Password));
-        assert_eq!(PasteTarget::ALL.len(), 4);
+        assert_eq!(PasteTarget::ALL.len(), 5);
     }
 
     #[test]
     fn an_address_bar_url_gets_its_scheme_back() {
-        // Browsers hide `https://`, so that is what gets copied out of the bar.
+        // Браузеры прячут `https://`, и именно это попадает в буфер.
         assert_eq!(
             classify_telegram_paste("app1593901251-login.tg.dev/tglogin?code=abc&state=1"),
             Some(TelegramPaste::Redirect(
@@ -937,7 +1090,7 @@ mod tests {
             vk_access_token("vk.ru/blank.html#access_token=FRA&state=s").as_deref(),
             Some("FRA")
         );
-        // A lone query or a bare token must not grow a host.
+        // Одиночный query или голый токен не должны обрасти хостом.
         assert_eq!(
             classify_telegram_paste("code=abc"),
             Some(TelegramPaste::Redirect("code=abc".into()))
@@ -953,6 +1106,6 @@ mod tests {
 
     #[test]
     fn the_clipboard_button_offers_one_caption() {
-        assert_eq!(PASTE_BUTTON, "Paste & Sign In");
+        assert_eq!(PASTE_BUTTON, "Вставить и войти");
     }
 }

@@ -12,8 +12,14 @@ anixart-parsers = { path = "../parsers" }
 # "null" backend that silently drops every Task, so reqwest calls would never run.
 # NOTE: iced 0.13 has no `wayland`/`x11` features (those only exist since 0.14);
 # winit 0.30 enables both Linux backends by default, so `tokio` is all we need.
-iced = { version = "0.13", features = ["tokio"] }
+# The `image` feature unlocks `iced::widget::image`, which the poster cards of the
+# Material-dark UI render from the in-memory cache of [`anixart_app::posters`].
+iced = { version = "0.13", features = ["tokio", "image"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+# Posters are validated with the very `image` crate iced's `image` feature pulls in
+# (the features unify, so no second copy is built): a truncated download would be
+# handed to the renderer as undecodable bytes, so it is decoded once here instead.
+image = "0.24"
 # Social login: `urlencoding` builds the browser authorize URLs and decodes the
 # loopback callback payload, `serde_json` reads/writes the persisted session
 # (~/.config/anixart-linux/session.json).

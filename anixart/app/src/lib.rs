@@ -1,36 +1,46 @@
-//! Anixart Linux client library: an iced 0.13 UI (modern Wayland / X11) wired to
-//! `anixart-core` (REST API) and `anixart-parsers` (video host resolution).
+//! Библиотека клиента Anixart Linux: интерфейс на iced 0.13 (современные Wayland и
+//! X11), обвязанный вокруг `anixart-core` (REST API) и `anixart-parsers` (решатели
+//! видеохостингов).
 //!
-//! Screens: a login screen offering password, Telegram / VK / Google OAuth
-//! (system browser + pasted redirect or token, plus a 1-click Google button that
-//! catches its own redirect on a loopback port and exchanges the credential
-//! through Firebase) and a direct Anixart session token, then the feed, search,
-//! and a release page with voiceover / source / episode selection and playback
-//! through an external `mpv` process.
+//! Экраны: вход — пароль, Telegram, VK ID, Yandex ID, Google / Firebase и прямой
+//! токен сессии, плюс гостевой пропуск; затем четыре корневых раздела — «Главная»,
+//! «Обзор», «Закладки», «Профиль» — и страница релиза со спуском
+//! озвучка → источник → серия, воспроизведение через внешний процесс `mpv`.
 //!
-//! The resulting token is persisted to `~/.config/anixart-linux/session.json`
-//! (see [`session`]) and restored on the next start, so the user stays logged in.
+//! Всё, что видит пользователь, написано по-русски и одето в Material 3 Dark
+//! ([`theme`]); обложки тянутся асинхронно и кэшируются ([`posters`]).
+//!
+//! Токен сессии переживает перезапуск в `~/.config/anixart-linux/session.json`
+//! (см. [`session`]) и восстанавливается при следующем старте, так что вход
+//! приходится повторять только после выхода.
 
 pub mod app;
+pub mod bookmarks;
 pub mod feed;
+pub mod lists;
 pub mod login;
 pub mod net;
+pub mod posters;
+pub mod profile;
 pub mod release;
 pub mod search;
 pub mod session;
+pub mod theme;
+pub mod util;
+pub mod widgets;
 
 pub use app::{App, Message, Screen};
 
-/// Window title of the Linux client.
+/// Заголовок окна клиента.
 pub const WINDOW_TITLE: &str = "Anixart Linux";
 
-/// Builds and runs the Anixart window (used by the `anixart` binary).
+/// Сборка и запуск окна Anixart (используется бинарником `anixart`).
 pub fn run() -> iced::Result {
     iced::application(WINDOW_TITLE, App::update, App::view)
-        .theme(|_| iced::Theme::Dark)
+        .theme(|app| app.theme())
         .window(iced::window::Settings {
-            size: iced::Size::new(1024.0, 768.0),
-            min_size: Some(iced::Size::new(620.0, 480.0)),
+            size: iced::Size::new(1280.0, 860.0),
+            min_size: Some(iced::Size::new(880.0, 560.0)),
             position: iced::window::Position::Centered,
             ..Default::default()
         })
@@ -38,238 +48,9 @@ pub fn run() -> iced::Result {
 }
 
 #[cfg(test)]
-mod tests {
-    // ── Screen transition tests ─────────────────────────────────────────────
-
-    #[derive(Debug, Clone, Copy, PartialEq)]
-    enum Screen {
-        Login,
-        Feed,
-        Search,
-        Release,
-    }
-
-    #[test]
-    fn screen_navigation_works() {
-        let mut stack: Vec<Screen> = Vec::new();
-        let mut current = Screen::Login;
-
-        // Login -> Feed
-        stack.push(current);
-        current = Screen::Feed;
-        assert_eq!(current, Screen::Feed);
-        assert_eq!(stack.last(), Some(&Screen::Login));
-
-        // Feed -> Search
-        stack.push(current);
-        current = Screen::Search;
-        assert_eq!(current, Screen::Search);
-
-        // Back
-        current = stack.pop().unwrap();
-        assert_eq!(current, Screen::Feed);
-        current = stack.pop().unwrap();
-        assert_eq!(current, Screen::Login);
-    }
-
-    #[test]
-    fn screen_equality() {
-        assert_eq!(Screen::Login, Screen::Login);
-        assert_ne!(Screen::Feed, Screen::Search);
-        assert_ne!(Screen::Release, Screen::Search);
-    }
-
-    // ── EpisodeInfo message test ────────────────────────────────────────────
-
-    #[derive(Debug, Clone)]
-    struct EpisodeInfo {
-        url: String,
-    }
-
-    #[derive(Debug, Clone)]
-    enum Msg {
-        Play(EpisodeInfo),
-        Back,
-        Noop,
-    }
-
-    #[test]
-    fn episode_info_carries_url() {
-        let info = EpisodeInfo {
-            url: "https://example.com/video.mp4".into(),
-        };
-        let msg = Msg::Play(info);
-        if let Msg::Play(ep) = msg {
-            assert!(ep.url.contains("example.com"));
-            assert!(ep.url.ends_with(".mp4"));
-        } else {
-            panic!("expected Play variant");
-        }
-    }
-
-    #[test]
-    fn message_clone() {
-        let m1 = Msg::Back;
-        let m2 = m1.clone();
-        assert!(matches!(m2, Msg::Back));
-
-        let noop = Msg::Noop;
-        assert!(matches!(noop, Msg::Noop));
-    }
-
-    // ── Error state tests ───────────────────────────────────────────────────
-
-    #[derive(Debug, Clone)]
-    struct FormState {
-        error: Option<String>,
-        loading: bool,
-    }
-
-    #[test]
-    fn form_state_transitions() {
-        let mut form = FormState {
-            error: None,
-            loading: false,
-        };
-
-        form.loading = true;
-        assert!(form.loading);
-
-        form.error = Some("network error".into());
-        assert_eq!(form.error.as_deref(), Some("network error"));
-
-        form.loading = false;
-        form.error = None;
-        assert!(form.error.is_none());
-        assert!(!form.loading);
-    }
-
-    // ── Navigation guard: logout clears stack ───────────────────────────────
-
-    #[test]
-    fn logout_clears_state() {
-        let mut stack = vec![Screen::Login, Screen::Feed, Screen::Search];
-        let mut screen = Screen::Search;
-        assert_eq!(screen, Screen::Search);
-
-        // Logout
-        screen = Screen::Login;
-        stack.clear();
-
-        assert!(stack.is_empty());
-        assert_eq!(screen, Screen::Login);
-    }
-
-    // ── Screen prevents duplicate pushes ────────────────────────────────────
-
-    #[test]
-    fn no_duplicate_screen_push() {
-        let mut stack: Vec<Screen> = Vec::new();
-        let mut current = Screen::Feed;
-
-        if current != Screen::Feed {
-            stack.push(current);
-        }
-        assert!(stack.is_empty());
-
-        // Navigate to different screen
-        if current != Screen::Search {
-            stack.push(current);
-        }
-        current = Screen::Search;
-        assert_eq!(current, Screen::Search);
-        assert_eq!(stack.len(), 1);
-        assert_eq!(stack[0], Screen::Feed);
-    }
-
-    // ── Type selected state ─────────────────────────────────────────────────
-
-    #[test]
-    fn type_selection_resets_sources_and_episodes() {
-        let mut selected_type_idx: Option<usize> = None;
-        let mut selected_source_idx: Option<usize> = Some(0);
-        let mut sources = vec!["src1", "src2"];
-        let mut episodes = vec!["ep1", "ep2"];
-
-        // Initial state
-        assert!(selected_type_idx.is_none());
-        assert_eq!(selected_source_idx, Some(0));
-
-        // Select a type
-        selected_type_idx = Some(0);
-        selected_source_idx = None;
-        sources.clear();
-        episodes.clear();
-
-        assert_eq!(selected_type_idx, Some(0));
-        assert!(selected_source_idx.is_none());
-        assert!(sources.is_empty());
-        assert!(episodes.is_empty());
-    }
-
-    // ── Source selection resets episodes ────────────────────────────────────
-
-    #[test]
-    fn source_selection_resets_episodes() {
-        let mut episodes = vec!["ep1", "ep2"];
-
-        // Select a source
-        episodes.clear();
-
-        assert!(episodes.is_empty());
-    }
-
-    // ── Async result wrapping ───────────────────────────────────────────────
-
-    #[test]
-    fn result_mapping() {
-        let ok: Result<String, String> = Ok("token_abc".into());
-        let mapped = ok.map(|t| format!("got: {t}"));
-        assert_eq!(mapped.as_deref(), Ok("got: token_abc"));
-
-        fn failing() -> Result<String, String> {
-            Err("failed".into())
-        }
-        let err = failing();
-        assert!(err.is_err());
-        match err {
-            Err(e) => assert_eq!(e, "failed"),
-            Ok(_) => panic!("expected Err"),
-        }
-    }
-
-    // ── Best URL selection mimics ParsedVideo logic ─────────────────────────
-
-    #[test]
-    fn best_url_selection() {
-        let qualities = [("480p", "url_480"), ("720p", "url_720"), ("1080p", "url_1080")];
-        let priority = ["2160p", "1440p", "1080p", "720p", "480p", "360p", "Default"];
-
-        let best = priority
-            .iter()
-            .find_map(|q| qualities.iter().find(|(k, _)| k == q).map(|(_, v)| *v));
-        assert_eq!(best, Some("url_1080"));
-    }
-
-    // ── Playback URL validation ─────────────────────────────────────────────
-
-    #[test]
-    fn direct_stream_check() {
-        // Replicate anixart_parsers::is_direct_stream logic
-        fn is_direct(url: &str) -> bool {
-            let path = url.split('?').next().unwrap_or(url).to_ascii_lowercase();
-            path.ends_with(".mp4") || path.ends_with(".m3u8")
-        }
-
-        assert!(is_direct("https://cdn.example.com/video.mp4?token=x"));
-        assert!(is_direct("https://cdn.example.com/master.m3u8"));
-        assert!(!is_direct("https://kodik.info/serial/123"));
-    }
-}
-
-#[cfg(test)]
 mod app_tests {
     use crate::app::{play_with_mpv, App, Message, Screen};
+    use crate::lists::BrowseTab;
     use crate::login::{LoginMethod, PasteTarget};
     use crate::release::ReleaseView;
     use crate::session::SessionStore;
@@ -277,9 +58,35 @@ mod app_tests {
     use anixart_core::{FeedItem, Pageable};
     use anixart_parsers::{ParsedVideo, VideoSource};
 
+    /// Хранилище в временном каталоге: своя папка на каждый тест.
+    fn temp_store(tag: &str) -> SessionStore {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos())
+            .unwrap_or(0);
+        let root = std::env::temp_dir().join(format!("anixart-app-{tag}-{nanos:09}"));
+        SessionStore::with_root(root)
+    }
+
     #[test]
     fn window_title_is_anixart_linux() {
         assert_eq!(crate::WINDOW_TITLE, "Anixart Linux");
+    }
+
+    #[test]
+    fn every_screen_module_is_declared() {
+        // Порядок объявления важен только для читаемости, а вот полнота — нет:
+        // пропущенный модуль ломает сборку, поэтому здесь проверяется, что
+        // русские экраны и их инфраструктура действительно экспортированы.
+        assert_eq!(Screen::Feed.label(), "Главная");
+        assert_eq!(Screen::Browse.label(), "Обзор");
+        assert_eq!(Screen::Bookmarks.label(), "Закладки");
+        assert_eq!(Screen::Profile.label(), "Профиль");
+
+        // Тема окна — свой Material 3 Dark, а не встроенный `Theme::Dark`.
+        let theme = crate::theme::theme();
+        assert_eq!(format!("{theme}"), "Anixart Dark");
+        assert_eq!(theme.palette(), crate::theme::palette());
     }
 
     #[test]
@@ -297,7 +104,7 @@ mod app_tests {
     #[test]
     fn startup_matches_whatever_the_environment_holds() {
         let (app, _task) = App::startup();
-        // A restored session implies the feed; nothing else may skip login.
+        // Восстановленная сессия открывает «Главную»; больше ничего не минует вход.
         assert_eq!(app.screen == Screen::Feed, app.token.is_some());
         assert!(app.stack.is_empty());
     }
@@ -320,7 +127,7 @@ mod app_tests {
         let _ = app.update(Message::LoginSubmit);
 
         assert!(!app.login.loading);
-        assert_eq!(app.error.as_deref(), Some("Username is required"));
+        assert_eq!(app.error.as_deref(), Some("Укажите логин или почту профиля"));
     }
 
     #[test]
@@ -345,7 +152,7 @@ mod app_tests {
             code: 0,
             content: vec![FeedItem {
                 id: 1,
-                title: Some("New season".into()),
+                title: Some("Новый сезон".into()),
                 ..Default::default()
             }],
             current_page: 0,
@@ -363,20 +170,23 @@ mod app_tests {
     fn feed_error_clears_loading() {
         let mut app = App::with_store(SessionStore::disabled());
         app.feed.loading = true;
-        let _ = app.update(Message::FeedLoaded(Err("offline".into())));
+        let _ = app.update(Message::FeedLoaded(Err("офлайн".into())));
 
         assert!(!app.feed.loading);
-        assert_eq!(app.error.as_deref(), Some("offline"));
+        assert_eq!(app.error.as_deref(), Some("офлайн"));
     }
 
     #[test]
     fn blank_search_query_is_ignored() {
         let mut app = App::with_store(SessionStore::disabled());
+        let _ = app.update(Message::Nav(Screen::Browse));
+        assert_eq!(app.browse.tab, BrowseTab::Search);
+
         let _ = app.update(Message::SearchQuery("   ".into()));
         let _ = app.update(Message::SearchSubmit);
 
-        assert!(!app.search.loading);
-        assert_eq!(app.search.page, 0);
+        assert!(!app.browse.loading);
+        assert_eq!(app.browse.page, 0);
     }
 
     #[test]
@@ -386,12 +196,12 @@ mod app_tests {
         app.screen = Screen::Feed;
         app.stack = Vec::new();
 
-        let _ = app.update(Message::Nav(Screen::Search));
-        assert_eq!(app.screen, Screen::Search);
+        let _ = app.update(Message::Nav(Screen::Browse));
+        assert_eq!(app.screen, Screen::Browse);
         assert_eq!(app.stack, vec![Screen::Feed]);
 
-        // Re-selecting the current screen must not duplicate the entry.
-        let _ = app.update(Message::Nav(Screen::Search));
+        // Повторный выбор текущего раздела не дублирует запись стека.
+        let _ = app.update(Message::Nav(Screen::Browse));
         assert_eq!(app.stack, vec![Screen::Feed]);
 
         let _ = app.update(Message::Back);
@@ -404,7 +214,7 @@ mod app_tests {
         let mut app = App::with_store(SessionStore::disabled());
         app.token = Some("token".into());
         app.screen = Screen::Release;
-        app.stack = vec![Screen::Feed, Screen::Search];
+        app.stack = vec![Screen::Feed, Screen::Browse];
         app.error = Some("boom".into());
 
         let _ = app.update(Message::Logout);
@@ -451,7 +261,7 @@ mod app_tests {
             ..Default::default()
         };
         app.screen = Screen::Release;
-        app.stack = vec![Screen::Search];
+        app.stack = vec![Screen::Browse];
 
         let _ = app.update(Message::ReleaseBack);
         assert!(app.release.selected_source.is_none());
@@ -462,9 +272,9 @@ mod app_tests {
         let _ = app.update(Message::ReleaseBack);
         assert!(app.release.selected_type.is_none());
 
-        // Third press leaves the release screen entirely.
+        // Третье нажатие закрывает саму страницу.
         let _ = app.update(Message::ReleaseBack);
-        assert_eq!(app.screen, Screen::Search);
+        assert_eq!(app.screen, Screen::Browse);
     }
 
     #[test]
@@ -474,17 +284,18 @@ mod app_tests {
         let _ = app.update(Message::PlayEpisode(0));
 
         assert!(app.release.pending.is_none());
-        assert_eq!(app.error.as_deref(), Some("Episode has no playback URL"));
+        let error = app.error.expect("подсказка о пустой ссылке");
+        assert!(error.contains("нет ссылки"), "{error}");
     }
 
     #[test]
     fn playback_failure_clears_the_pending_episode() {
         let mut app = App::with_store(SessionStore::disabled());
         app.release.pending = Some(2);
-        let _ = app.update(Message::PlaybackResolved(Err("resolver down".into())));
+        let _ = app.update(Message::PlaybackResolved(Err("решатель недоступен".into())));
 
         assert!(app.release.pending.is_none());
-        assert_eq!(app.error.as_deref(), Some("resolver down"));
+        assert_eq!(app.error.as_deref(), Some("решатель недоступен"));
     }
 
     #[test]
@@ -497,7 +308,7 @@ mod app_tests {
     #[test]
     fn dismissing_error_clears_it() {
         let mut app = App::with_store(SessionStore::disabled());
-        app.error = Some("temporary".into());
+        app.error = Some("временная".into());
         let _ = app.update(Message::DismissError);
 
         assert!(app.error.is_none());
@@ -506,27 +317,18 @@ mod app_tests {
     #[test]
     fn dismissing_status_clears_it() {
         let mut app = App::with_store(SessionStore::disabled());
-        app.status = Some("Telegram opened in the browser".into());
+        app.status = Some("Telegram открыт в браузере".into());
         let _ = app.update(Message::DismissStatus);
 
         assert!(app.status.is_none());
     }
 
-    // ── Login tabs and social flows ────────────────────────────────────────
-
-    fn temp_store(tag: &str) -> SessionStore {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.subsec_nanos())
-            .unwrap_or(0);
-        let root = std::env::temp_dir().join(format!("anixart-app-{tag}-{nanos:09}"));
-        SessionStore::with_root(root)
-    }
+    // ── Вход: способы и социальные потоки ────────────────────────────────────
 
     #[test]
     fn switching_tab_clears_the_previous_error() {
         let mut app = App::with_store(SessionStore::disabled());
-        app.error = Some("bad password".into());
+        app.error = Some("неверный пароль".into());
 
         let _ = app.update(Message::LoginTab(LoginMethod::Telegram));
         assert_eq!(app.login.method, LoginMethod::Telegram);
@@ -545,11 +347,9 @@ mod app_tests {
 
         assert!(!app.login.loading);
         assert_eq!(app.screen, Screen::Login);
-        assert!(app
-            .error
-            .as_deref()
-            .unwrap_or_default()
-            .starts_with("Open the Telegram login first"));
+        let error = app.error.as_deref().unwrap_or_default();
+        assert!(error.starts_with("Сначала откройте вход Telegram"), "{error}");
+        assert!(error.contains("PKCE"), "{error}");
     }
 
     #[test]
@@ -572,7 +372,12 @@ mod app_tests {
         let _ = app.update(Message::LoginTab(LoginMethod::Vk));
         let _ = app.update(Message::LoginVkSubmit);
         assert!(!app.login.loading);
-        assert!(app.error.as_deref().unwrap().contains("VK ID redirect URL"));
+        assert!(app.error.as_deref().unwrap().contains("VK ID"));
+
+        let _ = app.update(Message::LoginTab(LoginMethod::Yandex));
+        let _ = app.update(Message::LoginYandexSubmit);
+        assert!(!app.login.loading);
+        assert!(app.error.as_deref().unwrap().contains("Yandex"));
 
         let _ = app.update(Message::LoginTab(LoginMethod::Google));
         let _ = app.update(Message::LoginGoogleSubmit);
@@ -581,7 +386,7 @@ mod app_tests {
 
         let _ = app.update(Message::LoginTab(LoginMethod::Token));
         let _ = app.update(Message::LoginTokenSubmit);
-        assert!(app.error.as_deref().unwrap().contains("Paste an Anixart session token"));
+        assert!(app.error.as_deref().unwrap().contains("токен сессии"));
         assert_eq!(app.screen, Screen::Login);
     }
 
@@ -596,7 +401,7 @@ mod app_tests {
         let _ = app.update(Message::LoginVkSubmit);
         assert!(app.login.loading);
 
-        let _ = app.update(Message::LoggedIn(Err("Anixart rejected the credential".into())));
+        let _ = app.update(Message::LoggedIn(Err("Anixart отверг credencial".into())));
         assert!(!app.login.loading);
         assert_eq!(app.screen, Screen::Login);
 
@@ -607,14 +412,44 @@ mod app_tests {
     }
 
     #[test]
+    fn yandex_opens_the_implicit_flow_and_takes_its_token_from_the_address_bar() {
+        let mut app = App::with_store(SessionStore::disabled());
+        let _ = app.update(Message::LoginTab(LoginMethod::Yandex));
+        let _ = app.update(Message::LoginYandexOpen);
+
+        // Headless CI не имеет открывщика, поэтому либо подсказка, либо ошибка;
+        // URL в любом случае собран и передан-desktop.
+        assert!(app.status.is_some() || app.error.is_some());
+        assert!(!app.login.loading);
+
+        let _ = app.update(Message::LoginYandexPaste(
+            "https://yxa980f005.oauth.yandex.ru/auth/finish?platform=android&access_token=YAN.123"
+                .into(),
+        ));
+        let _ = app.update(Message::LoginYandexSubmit);
+        assert!(app.login.loading);
+        assert!(app.error.is_none());
+
+        let _ = app.update(Message::LoggedIn(Ok("tok-yandex".into())));
+        assert_eq!(app.token.as_deref(), Some("tok-yandex"));
+        assert_eq!(app.screen, Screen::Feed);
+    }
+
+    #[test]
     fn the_one_click_google_button_runs_without_any_setup() {
         let mut app = App::with_store(SessionStore::disabled());
         let _ = app.update(Message::LoginTab(LoginMethod::Google));
 
-        // Nothing typed, no token hunted: the APK client id / Firebase key are
-        // already in place, so the browser flow starts immediately.
-        assert_eq!(app.login.google_client_id, anixart_core::oauth::GOOGLE_WEB_CLIENT_ID);
-        assert_eq!(app.login.firebase_api_key, anixart_core::oauth::FIREBASE_API_KEY);
+        // Ничего не вписано и не искалось: client id APK и ключ Firebase уже на
+        // месте, поэтому браузерный поток стразу начинается.
+        assert_eq!(
+            app.login.google_client_id,
+            anixart_core::oauth::GOOGLE_WEB_CLIENT_ID
+        );
+        assert_eq!(
+            app.login.firebase_api_key,
+            anixart_core::oauth::FIREBASE_API_KEY
+        );
 
         let _ = app.update(Message::LoginGoogleBrowser);
         assert!(app.login.loading);
@@ -625,16 +460,16 @@ mod app_tests {
             .unwrap_or_default()
             .contains("127.0.0.1"));
 
-        // Headless CI has no opener, so the task reports it through LoggedIn(Err)
-        // and the login screen stays usable with the paste fallback.
+        // В headless CI открывщика нет, поэтому поток сообщает об этом через
+        // LoggedIn(Err), а экран входа остаётся рабочим через ручную вставку.
         let _ = app.update(Message::LoggedIn(Err(
-            "Could not open the browser (no desktop opener found)".into(),
+            "Не удалось открыть браузер (desktop opener not found)".into(),
         )));
         assert!(!app.login.loading);
         assert_eq!(app.screen, Screen::Login);
         assert!(app.error.as_deref().unwrap().contains("desktop opener"));
 
-        // A second press while loading is ignored.
+        // Второе нажатие во время полёта игнорируется.
         let _ = app.update(Message::LoginGooglePaste("ey.jwt.tok".into()));
         let _ = app.update(Message::LoginGoogleSubmit);
         assert!(app.login.loading);
@@ -652,7 +487,7 @@ mod app_tests {
         assert_eq!(app.login.effective_google_client_id(), "custom.client.id");
         assert_eq!(app.login.effective_firebase_api_key(), "AIzaCustom");
 
-        // Clearing them restores the shipped values.
+        // Очищенные поля падают обратно на вшитые значения.
         let _ = app.update(Message::LoginGoogleClientId(String::new()));
         let _ = app.update(Message::LoginFirebaseKey(String::new()));
         assert_eq!(
@@ -671,8 +506,8 @@ mod app_tests {
         let _ = app.update(Message::LoginTab(LoginMethod::Google));
         let _ = app.update(Message::LoginGoogleOpen);
 
-        // No client id is required any more: the baked-in one is used, so the only
-        // possible failure is the missing desktop opener (headless CI).
+        // Client id больше не требуется: используется вшитый, поэтому единственная
+        // возможная неудача — отсутствие открывщика (headless CI).
         assert!(app.status.is_some() || app.error.is_some());
         assert!(!app.login.loading);
     }
@@ -683,8 +518,8 @@ mod app_tests {
         let _ = app.update(Message::LoginTab(LoginMethod::Telegram));
         let _ = app.update(Message::LoginTelegramOpen);
 
-        // Headless CI has no xdg-open, so one of the two is set; both mean the
-        // PKCE verifier was generated and the URL was handed to the desktop.
+        // В headless CI нет xdg-open, поэтому заполнено одно из двух; и то и другое
+        // означает, что PKCE-verifier сгенерирован и URL передан системе.
         assert!(app.status.is_some() || app.error.is_some());
         assert!(!app.login.telegram_verifier.is_empty());
     }
@@ -700,16 +535,16 @@ mod app_tests {
         assert_eq!(app.screen, Screen::Feed);
         assert!(app.feed.loading);
         assert!(app.error.is_none());
-        assert!(app.status.as_deref().unwrap().contains("Signed in via Token"));
+        assert!(app.status.as_deref().unwrap().contains("Токен"));
     }
 
-    // ── Clipboard: "Paste & Sign In" ───────────────────────────────────────
+    // ── Буфер обмена: «Вставить и войти» ─────────────────────────────────────
 
     #[test]
     fn clipboard_text_signs_the_token_tab_in() {
         let mut app = App::with_store(SessionStore::disabled());
         let _ = app.update(Message::LoginTab(LoginMethod::Token));
-        // Readers print a trailing newline, and iced hands back what it found.
+        // Читалки печатают перевод строки в конце, а iced отдаёт то, что нашёл.
         let _ = app.update(Message::ClipboardText(
             PasteTarget::Token,
             Some("  tok-clipboard \n".into()),
@@ -726,13 +561,13 @@ mod app_tests {
     fn an_empty_iced_clipboard_is_handed_to_the_external_readers() {
         let mut app = App::with_store(SessionStore::disabled());
 
-        // `None`, an empty string and whitespace-only text all mean the same thing:
-        // winit found no selection, so `wl-paste` / `xclip` / `xsel` have to answer.
+        // `None`, пустая строка и один пробел значат одно: winit выделения не нашёл,
+        // поэтому должны ответить `wl-paste` / `xclip` / `xsel`.
         for contents in [None, Some(String::new()), Some("   \n".into())] {
             let _ = app.update(Message::ClipboardText(PasteTarget::Vk, contents));
             assert!(app.login.vk_paste.is_empty());
             assert!(!app.login.loading);
-            assert!(app.error.is_none(), "the fallback is still in flight");
+            assert!(app.error.is_none(), "запасной путь ещё в полёте");
         }
     }
 
@@ -745,9 +580,29 @@ mod app_tests {
             Ok("vk.ru/blank.html#access_token=CLIP&state=s".into()),
         ));
 
-        assert_eq!(app.login.vk_paste, "vk.ru/blank.html#access_token=CLIP&state=s");
-        // The address-bar URL lost its scheme, so the token is read out of the
-        // rebuilt URL and the request goes out on the VK tab.
+        assert_eq!(
+            app.login.vk_paste,
+            "vk.ru/blank.html#access_token=CLIP&state=s"
+        );
+        // Адресная строка потеряла схему, поэтому токен читается из восстановленного
+        // URL, а запрос уходит на вкладке VK.
+        assert!(app.login.loading);
+        assert!(app.error.is_none());
+    }
+
+    #[test]
+    fn a_yandex_clipboard_paste_lands_on_the_yandex_tab() {
+        let mut app = App::with_store(SessionStore::disabled());
+        let _ = app.update(Message::LoginTab(LoginMethod::Yandex));
+        let _ = app.update(Message::ClipboardText(
+            PasteTarget::Yandex,
+            Some("https://yxa980f005.oauth.yandex.ru/auth/finish?access_token=YA\n".into()),
+        ));
+
+        assert_eq!(
+            app.login.yandex_paste,
+            "https://yxa980f005.oauth.yandex.ru/auth/finish?access_token=YA"
+        );
         assert!(app.login.loading);
         assert!(app.error.is_none());
     }
@@ -761,9 +616,12 @@ mod app_tests {
             Ok("app1593901251-login.tg.dev/tglogin?code=abc123".into()),
         ));
 
-        assert_eq!(app.login.telegram_paste, "app1593901251-login.tg.dev/tglogin?code=abc123");
+        assert_eq!(
+            app.login.telegram_paste,
+            "app1593901251-login.tg.dev/tglogin?code=abc123"
+        );
         assert!(!app.login.loading);
-        assert!(app.error.as_deref().unwrap().contains("PKCE verifier"));
+        assert!(app.error.as_deref().unwrap().contains("PKCE"));
         assert_eq!(app.screen, Screen::Login);
     }
 
@@ -773,10 +631,10 @@ mod app_tests {
         let _ = app.update(Message::LoginTab(LoginMethod::Google));
         let _ = app.update(Message::ClipboardFallback(
             PasteTarget::Google,
-            Err("no clipboard tool could run (wl-paste: No such file or directory)".into()),
+            Err("ни одна программа для чтения буфера не запустилась (wl-paste: No such file or directory)".into()),
         ));
 
-        let error = app.error.expect("an error");
+        let error = app.error.expect("ошибка");
         assert!(error.starts_with("Google:"), "{error}");
         assert!(error.contains("wl-paste"), "{error}");
         assert!(app.login.google_paste.is_empty());
@@ -787,11 +645,11 @@ mod app_tests {
     #[test]
     fn pressing_paste_clears_the_previous_error_and_ignores_a_second_press() {
         let mut app = App::with_store(SessionStore::disabled());
-        app.error = Some("stale".into());
+        app.error = Some("устарело".into());
         let _ = app.update(Message::LoginClipboard(PasteTarget::Telegram));
-        assert!(app.error.is_none(), "the read was started");
+        assert!(app.error.is_none(), "чтение буфера началось");
 
-        // While a sign-in is in flight the button is inert, and so is the message.
+        // Пока вход в полёте, кнопка бездейственна — как и её сообщение.
         app.login.loading = true;
         let _ = app.update(Message::LoginClipboard(PasteTarget::Telegram));
         assert!(app.error.is_none());
@@ -810,7 +668,7 @@ mod app_tests {
         assert_eq!(app.token.as_deref(), Some("tok-telegram"));
         assert!(app.error.is_none());
 
-        // A brand-new process sees the persisted token.
+        // Новый процесс видит сохранённый токен.
         let mut reopened = App::with_store(store.clone());
         assert_eq!(reopened.screen, Screen::Login);
         let _ = reopened.restore_session();
@@ -819,7 +677,7 @@ mod app_tests {
         assert!(reopened.feed.loading);
         assert!(reopened.status.as_deref().unwrap().contains("telegram"));
 
-        // Logging out wipes the file.
+        // Выход стирает файл.
         let _ = reopened.update(Message::Logout);
         assert!(reopened.token.is_none());
         assert_eq!(reopened.screen, Screen::Login);

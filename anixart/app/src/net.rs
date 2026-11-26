@@ -17,12 +17,14 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use anixart_core::{
-    oauth, AnixartClient, Episode, EpisodeType, FeedItem, Pageable, Release,
-    ReleaseSearchResponse, SocialSignInResponse, Source,
+    oauth, AnixartClient, Collection, Episode, EpisodeType, FeedItem, FilterRequest, Pageable,
+    ProfileInfoResponse, Release, ReleaseSearchResponse, SocialSignInResponse, Source,
 };
 use anixart_parsers::ParsedVideo;
 
+use crate::lists::{BookmarkTab, DiscoverKind, FeedCategory, WatchStatus};
 use crate::login::{google_callback_error, google_credential_from, random_verifier};
+use crate::profile::ProfileSnapshot;
 
 /// Builds an API client, attaching the session token when available.
 fn api_client(token: Option<String>) -> Result<AnixartClient, String> {
@@ -44,7 +46,7 @@ pub async fn login(username: String, password: String) -> Result<String, String>
     client
         .token()
         .map(str::to_owned)
-        .ok_or_else(|| "No token in sign-in response".to_owned())
+        .ok_or_else(|| "Нет токена в ответе входа".to_owned())
 }
 
 /// Turns a social `auth/*` answer into either the session token or a message
@@ -59,20 +61,20 @@ fn token_of(response: &SocialSignInResponse) -> Result<String, String> {
 /// Human-readable form of the `auth/{provider}` response codes.
 fn describe_code(code: i32) -> String {
     match code {
-        0 => "No token in sign-in response".to_owned(),
-        1 => "Anixart rejected the credential (code 1)".to_owned(),
-        2 => "Invalid OAuth request (code 2)".to_owned(),
-        3 => "This social account is not linked to an Anixart profile yet — \
-              sign up with login + e-mail in the official client, then sign in \
-              here (code 3)"
+        0 => "Нет токена в ответе входа".to_owned(),
+        1 => "Anixart отклонил учётные данные (код 1)".to_owned(),
+        2 => "Некорректный OAuth-запрос (код 2)".to_owned(),
+        3 => "Этот социальный аккаунт ещё не привязан к профилю Anixart — \
+              зарегистрируйте его в официальном клиенте с логином и почтой, \
+              затем войдите здесь (код 3)"
             .to_owned(),
-        4 => "Invalid login (code 4)".to_owned(),
-        5 => "Invalid e-mail (code 5)".to_owned(),
-        6 => "Login already taken (code 6)".to_owned(),
-        7 => "E-mail already taken (code 7)".to_owned(),
-        402 => "This account is banned (code 402)".to_owned(),
-        403 => "This account is permanently banned (code 403)".to_owned(),
-        other => format!("Anixart returned code {other}"),
+        4 => "Неверный логин (код 4)".to_owned(),
+        5 => "Неверная почта (код 5)".to_owned(),
+        6 => "Логин уже занят (код 6)".to_owned(),
+        7 => "Почта уже занята (код 7)".to_owned(),
+        402 => "Профиль заблокирован (код 402)".to_owned(),
+        403 => "Профиль заблокирован навсегда (код 403)".to_owned(),
+        other => format!("Anixart вернул код {other}"),
     }
 }
 
@@ -106,6 +108,17 @@ pub async fn sign_in_vk(access_token: String) -> Result<String, String> {
     let mut client = AnixartClient::new().map_err(|e| e.to_string())?;
     let response = client
         .sign_in_vk(&access_token)
+        .await
+        .map_err(|e| e.to_string())?;
+    token_of(&response)
+}
+
+/// `POST /auth/yandex` with a Yandex ID OAuth access token (`ya29`-like opaque
+/// string from the implicit flow's URL fragment).
+pub async fn sign_in_yandex(access_token: String) -> Result<String, String> {
+    let mut client = AnixartClient::new().map_err(|e| e.to_string())?;
+    let response = client
+        .sign_in_yandex(&access_token)
         .await
         .map_err(|e| e.to_string())?;
     token_of(&response)
@@ -160,7 +173,7 @@ pub async fn sign_in_google_auto(
     firebase_api_key: String,
 ) -> Result<String, String> {
     let (token, is_access_token) = google_credential_from(&pasted)
-        .ok_or_else(|| "No Google credential in that input".to_owned())?;
+        .ok_or_else(|| "В этом вводе нет Google-креденциала".to_owned())?;
 
     if is_access_token {
         return sign_in_google_via_firebase(token, true, firebase_api_key).await;
@@ -203,19 +216,19 @@ pub async fn sign_in_google_browser(
         Ok(captured) => captured?,
         Err(_) => {
             return Err(format!(
-                "Timed out after {} s waiting for the Google redirect. Press the button \
-                 again, or paste the URL the browser landed on into the field below.",
+                "Ожидание Google-редиректа длилось больше {} секунд. Нажмите кнопку ещё раз \
+                 либо вставьте URL, на который перешёл браузер, в поле ниже.",
                 CALLBACK_TIMEOUT.as_secs()
             ))
         }
     };
 
     if let Some(reason) = google_callback_error(&payload) {
-        return Err(format!("Google did not grant the sign-in: {reason}"));
+        return Err(format!("Google не разрешил вход: {reason}"));
     }
     let (token, is_access_token) = google_credential_from(&payload).ok_or_else(|| {
-        "The Google redirect carried no id_token / access_token — paste the URL the \
-         browser landed on into the field below."
+        "В Google-редиректе нет id_token / access_token — вставьте URL, на который перешёл \
+         браузер, в поле ниже."
             .to_owned()
     })?;
 
@@ -270,7 +283,7 @@ pub mod google_callback {
                 .inner
                 .accept()
                 .await
-                .map_err(|e| format!("Google callback listener: {e}"))?;
+                .map_err(|e| format!("Слушатель Google-редиректа: {e}"))?;
             // `Ok(None)` = the relay page was served, `Err(_)` = the client hung
             // up mid-request. Neither ends the wait: browsers routinely open more
             // than one connection (favicons, reloads, redirects) to this origin.
@@ -413,28 +426,31 @@ pub mod google_callback {
 
     /// Served on the redirect: extracts the URL fragment (or query) and posts it
     /// back to `/callback`, so the desktop client receives what the browser hid.
+    ///
+    /// The page is Russian because the user reading it is Russian: it is the only
+    /// screen of the login flow that lives outside the iced window.
     pub const RELAY_PAGE: &str = r#"<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
+<html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Anixart — Google sign-in</title>
+<title>Anixart — вход через Google</title>
 <style>
- body{font:15px/1.5 system-ui,sans-serif;background:#12141c;color:#e8eaf2;margin:0;
+ body{font:15px/1.5 system-ui,sans-serif;background:#141414;color:#f2f2f3;margin:0;
       display:flex;min-height:100vh;align-items:center;justify-content:center}
  main{max-width:34rem;padding:2rem;text-align:center}
- code{background:#1d2130;border-radius:.35rem;padding:.1rem .35rem}
- #hint{color:#8f96ad;font-size:.9rem;word-break:break-all}
+ code{background:#2a2a2a;border-radius:.35rem;padding:.1rem .35rem}
+ #hint{color:#9a9aa2;font-size:.9rem;word-break:break-all}
 </style></head>
 <body><main>
- <h2 id="title">Returning to Anixart…</h2>
- <p id="hint">This page only forwards the sign-in redirect to the desktop client
- listening on <code>127.0.0.1</code>. It can be closed afterwards.</p>
+ <h2 id="title">Возвращаемся в Anixart…</h2>
+ <p id="hint">Страница лишь передаёт редирект входа десктопному клиенту, который
+ слушает <code>127.0.0.1</code>. После этого её можно закрыть.</p>
  <script>
  (function () {
    var hash = location.hash ? location.hash.slice(1) : "";
    var query = location.search ? location.search.slice(1) : "";
    var payload = hash || query;
    if (!payload) {
-     document.getElementById("title").textContent = "No credential in this redirect";
+     document.getElementById("title").textContent = "В этом редиректе нет креденциала";
      return;
    }
    fetch("/callback", {
@@ -443,19 +459,19 @@ pub mod google_callback {
      body: payload,
      keepalive: true
    }).then(function () {
-     document.getElementById("title").textContent = "Signed in — you can close this tab";
+     document.getElementById("title").textContent = "Вход выполнен — вкладку можно закрыть";
    }).catch(function () {
      document.getElementById("hint").textContent =
-       "Could not reach the client. Copy this into Anixart instead: " + location.href;
+       "Клиент не отвечает. Скопируйте это в Anixart вручную: " + location.href;
    });
  })();
  </script>
 </main></body></html>"#;
 
     /// Acknowledgement of the captured fragment.
-    pub const DONE_PAGE: &str = "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\
-        <title>Anixart — Google sign-in</title></head><body style=\"font:15px system-ui,sans-serif;\
-        background:#12141c;color:#e8eaf2;margin:2rem\">Signed in. This tab can be closed.\
+    pub const DONE_PAGE: &str = "<!doctype html><html lang=\"ru\"><head><meta charset=\"utf-8\">\
+        <title>Anixart — вход через Google</title></head><body style=\"font:15px system-ui,sans-serif;\
+        background:#141414;color:#f2f2f3;margin:2rem\">Вход выполнен. Эту вкладку можно закрыть.\
         </body></html>";
 
     #[cfg(test)]
@@ -592,7 +608,7 @@ pub mod google_callback {
             assert!(RELAY_PAGE.contains("fetch(\"/callback\""));
             assert!(RELAY_PAGE.contains("location.hash"));
             assert!(RELAY_PAGE.contains("location.search"));
-            assert!(DONE_PAGE.contains("Signed in"));
+            assert!(DONE_PAGE.contains("Вход выполнен"));
         }
     }
 }
@@ -621,7 +637,7 @@ impl ClipboardReader {
             .map_err(|e| e.to_string())?;
 
         if !output.status.success() {
-            return Err(format!("failed ({})", output.status));
+            return Err(format!("не сработал ({})", output.status));
         }
         Ok(clipboard_text(&output.stdout))
     }
@@ -687,11 +703,12 @@ pub async fn read_clipboard() -> Result<String, String> {
         Err(_) => {
             let secs = CLIPBOARD_TIMEOUT.as_secs();
             Err(format!(
-                "the clipboard tools (wl-paste / xclip / xsel) took longer than {secs} s. \
-                 Install wl-clipboard or xclip and try again, or type the value into the field"
+                "буфер обмена (wl-paste / xclip / xsel) отвечал дольше {secs} с. \
+                 Установите wl-clipboard или xclip и повторите, либо введите значение \
+                 в поле вручную"
             ))
         }
-        Ok(Err(crashed)) => Err(format!("the clipboard reader crashed: {crashed}")),
+        Ok(Err(crashed)) => Err(format!("читалка буфера обмена упала: {crashed}")),
         Ok(Ok(result)) => result,
     }
 }
@@ -707,7 +724,7 @@ fn read_clipboard_blocking() -> Result<String, String> {
             Ok(Some(text)) => return Ok(text),
             Ok(None) => {
                 saw_text_target = true;
-                failures.push(format!("{program}: no text"));
+                failures.push(format!("{program}: нет текста"));
             }
             Err(reason) => failures.push(format!("{program}: {reason}")),
         }
@@ -715,14 +732,14 @@ fn read_clipboard_blocking() -> Result<String, String> {
 
     Err(if saw_text_target {
         format!(
-            "the clipboard holds no readable text ({}). Copy the URL or token in the \
-             browser first, then press “Paste & Sign In” again",
+            "в буфере обмена нет читаемого текста ({}). Скопируйте URL или токен в \
+             браузере и снова нажмите «Вставить и войти»",
             failures.join(", ")
         )
     } else {
         format!(
-            "no clipboard tool could run ({}). Install wl-clipboard or xclip, or type the \
-             value into the field",
+            "ни одна программа для чтения буфера не запустилась ({}). Установите \
+             wl-clipboard или xclip, либо введите значение в поле вручную",
             failures.join(", ")
         )
     })
@@ -754,7 +771,20 @@ pub async fn release(token: Option<String>, id: i64) -> Result<Box<Release>, Str
     response
         .release
         .map(Box::new)
-        .ok_or_else(|| format!("Release {id} not found"))
+        .ok_or_else(|| format!("Релиз {id} не найден"))
+}
+
+/// `GET /collection/{id}` — the opened collection with its releases.
+///
+/// A collection body carries every release it holds, so it is boxed for the same
+/// reason [`release`] is: one small [`Message`](crate::app::Message) variant.
+pub async fn collection(token: Option<String>, id: i64) -> Result<Box<Collection>, String> {
+    let client = api_client(token)?;
+    let response = client.collection(id).await.map_err(|e| e.to_string())?;
+    response
+        .collection
+        .map(Box::new)
+        .ok_or_else(|| format!("Коллекция {id} не найдена"))
 }
 
 /// `GET /episode/{id}` — voiceovers / translations.
@@ -790,6 +820,209 @@ pub async fn episodes(
         .await
         .map(|r| r.episodes)
         .map_err(|e| e.to_string())
+}
+
+/// One «Главная» category: the latest-articles endpoint for [`FeedCategory::Latest`],
+/// `feed/all` with the window's `date` for the rest.
+pub async fn feed_window(
+    token: Option<String>,
+    category: FeedCategory,
+    page: u32,
+) -> Result<Pageable<FeedItem>, String> {
+    let client = api_client(token)?;
+    let fetched = match category.date() {
+        None => client.feed(page).await,
+        Some(date) => client.feed_all(page, None, date).await,
+    };
+    fetched.map_err(|e| e.to_string())
+}
+
+/// Poster, cover or avatar bytes from the Anixart CDN.
+///
+/// The artwork host is a plain static file server, so no session token is sent:
+/// the request rides the same [`reqwest::Client`] the API calls use, which carries
+/// the shipping client's `User-Agent` (the CDN answers 403 to a bare one).
+pub async fn poster_bytes(url: String) -> Result<Vec<u8>, String> {
+    let client = api_client(None)?;
+    let response = client
+        .http()
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .error_for_status()
+        .map_err(|e| e.to_string())?;
+    let bytes = response.bytes().await.map_err(|e| e.to_string())?;
+    if bytes.is_empty() {
+        return Err("Пустой ответ обложки".to_owned());
+    }
+    Ok(bytes.to_vec())
+}
+
+/// One page of the «Закладки» screen, routed to the endpoint its tab names.
+///
+/// Every section belongs to a profile, so all five of them are `require_token()`
+/// calls upstream: without a token this returns the backend's own message rather
+/// than issuing a request the server will refuse.
+pub async fn bookmark_releases(
+    token: Option<String>,
+    tab: BookmarkTab,
+    page: u32,
+) -> Result<Pageable<Release>, String> {
+    let client = api_client(token)?;
+    let fetched = match tab {
+        BookmarkTab::Collections | BookmarkTab::History | BookmarkTab::Favorites => {
+            if tab.is_collections() {
+                return Err("Раздел «Коллекции» содержит коллекции, а не релизы".to_owned());
+            }
+            if tab == BookmarkTab::History {
+                client.history(page).await
+            } else {
+                client.favorites(page, None, None).await
+            }
+        }
+        BookmarkTab::Watching
+        | BookmarkTab::Plan
+        | BookmarkTab::Completed
+        | BookmarkTab::HoldOn
+        | BookmarkTab::Dropped => match tab.status().and_then(WatchStatus::to_core) {
+            Some(status) => client.watch_list(status, page, None, None).await,
+            None => return Err("У раздела нет статуса списка".to_owned()),
+        },
+    };
+    fetched.map_err(|e| e.to_string())
+}
+
+/// `GET /collectionFavorite/all/{page}` — the collections tab.
+pub async fn bookmark_collections(
+    token: Option<String>,
+    page: u32,
+) -> Result<Pageable<Collection>, String> {
+    let client = api_client(token)?;
+    client
+        .favorite_collections(page)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// `GET /favorite/add/{id}` / `GET /favorite/delete/{id}` — one toggle, two calls.
+pub async fn set_favorite(
+    token: Option<String>,
+    release_id: i64,
+    favorite: bool,
+) -> Result<(), String> {
+    let client = api_client(token)?;
+    let response = if favorite {
+        client.favorite_add(release_id).await
+    } else {
+        client.favorite_delete(release_id).await
+    };
+    response.map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// `GET /profile/list/add/{status}/{r_id}` — moves a release into a watch list.
+pub async fn apply_watch_status(
+    token: Option<String>,
+    status: WatchStatus,
+    release_id: i64,
+) -> Result<(), String> {
+    let Some(core) = status.to_core() else {
+        return Err("Статус «Не смотрю» удаляет релиз из списка".to_owned());
+    };
+    let client = api_client(token)?;
+    client.set_watch_status(core, release_id).await.map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// `GET /profile/list/delete/{status}/{r_id}` — takes a release out of a list.
+pub async fn drop_watch_status(
+    token: Option<String>,
+    status: WatchStatus,
+    release_id: i64,
+) -> Result<(), String> {
+    let Some(core) = status.to_core() else {
+        return Ok(()); // nothing to delete: the release was in no list at all
+    };
+    let client = api_client(token)?;
+    client
+        .remove_watch_status(core, release_id)
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// `GET /history/add/{r_id}/{s_id}/{position}` — marks an episode as opened, which
+/// is what puts the release on the «История» tab.
+pub async fn history_add(
+    token: Option<String>,
+    release_id: i64,
+    source_id: i64,
+    position: i32,
+) -> Result<(), String> {
+    let client = api_client(token)?;
+    client
+        .history_add(release_id, source_id, position)
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// `GET /history/delete/{r_id}` — forgets a release on the «История» tab.
+pub async fn history_delete(token: Option<String>, release_id: i64) -> Result<(), String> {
+    let client = api_client(token)?;
+    client
+        .history_delete(release_id)
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// `POST /filter/{page}` — the catalogue shelf of «Обзор».
+pub async fn filter_releases(
+    token: Option<String>,
+    page: u32,
+    sort: i32,
+) -> Result<Pageable<Release>, String> {
+    let client = api_client(token)?;
+    let request = FilterRequest { sort, ..Default::default() };
+    client
+        .filter_releases(page, &request, None)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// `POST /discover/{interesting,comments}` — the two editorial shelves.
+pub async fn discover(
+    token: Option<String>,
+    kind: DiscoverKind,
+) -> Result<Pageable<Release>, String> {
+    let client = api_client(token)?;
+    let found = match kind {
+        DiscoverKind::Interesting => client.discover_interesting().await,
+        DiscoverKind::Comments => client.discover_comments().await,
+    };
+    found.map_err(|e| e.to_string())
+}
+
+/// `GET /profile/info` → `GET /profile/{channel_id}` — the «Профиль» screen.
+///
+/// The info call only carries the numeric profile id, so the login, avatar and
+/// list counters are read from the profile itself; a profile that has never been
+/// filled in still yields the session's privilege level and rating.
+pub async fn profile_snapshot(token: Option<String>) -> Result<ProfileSnapshot, String> {
+    let client = api_client(token)?;
+    let info: ProfileInfoResponse = client.profile_info().await.map_err(|e| e.to_string())?;
+
+    let profile = match info.channel_id {
+        Some(id) if id > 0 => client
+            .profile(id)
+            .await
+            .map_err(|e| e.to_string())?
+            .profile,
+        // no channel id yet: the session itself is all this screen has
+        _ => None,
+    };
+
+    Ok(ProfileSnapshot { info, profile })
 }
 
 /// Resolves an embed / host URL (Kodik, Sibnet, VK, RuTube, Anilibria, direct)
@@ -830,7 +1063,7 @@ mod tests {
     fn an_empty_token_is_not_a_success() {
         assert_eq!(
             token_of(&response(0, "")).unwrap_err(),
-            "No token in sign-in response"
+            "Нет токена в ответе входа"
         );
     }
 
@@ -840,14 +1073,14 @@ mod tests {
             let message = describe_code(code);
             assert!(message.contains(&code.to_string()), "{code}: {message}");
         }
-        assert!(describe_code(3).contains("not linked to an Anixart profile"));
-        assert!(describe_code(402).contains("banned"));
+        assert!(describe_code(3).contains("ещё не привязан"));
+        assert!(describe_code(402).contains("заблокирован"));
     }
 
     #[test]
     fn not_registered_explains_the_next_step() {
         let error = token_of(&response(3, "")).expect_err("code 3");
-        assert!(error.starts_with("This social account is not linked"));
+        assert!(error.starts_with("Этот социальный аккаунт ещё не привязан"), "{error}");
     }
 
     /// The paste fallback rejects a credential-less input *before* touching the
@@ -858,7 +1091,7 @@ mod tests {
             let error = sign_in_google_auto(pasted.to_owned(), oauth::FIREBASE_API_KEY.to_owned())
                 .await
                 .expect_err("no credential");
-            assert_eq!(error, "No Google credential in that input", "{pasted:?}");
+            assert_eq!(error, "В этом вводе нет Google-креденциала", "{pasted:?}");
         }
     }
 
@@ -919,7 +1152,7 @@ mod tests {
             Ok(text) => assert!(!text.trim().is_empty()),
             Err(error) => {
                 assert!(error.contains("wl-paste"), "{error}");
-                assert!(error.to_lowercase().contains("clipboard"), "{error}");
+                assert!(error.contains("буфер"), "{error}");
             }
         }
     }

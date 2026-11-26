@@ -229,7 +229,7 @@ fn filter_request_with_fields_serializes_correctly() {
     let json = serde_json::to_value(&req).unwrap();
     assert_eq!(json["sort"], 1);
     assert_eq!(json["country"], "JP");
-    assert_eq!(json["genres"], ["Action", "Fantasy"]);
+    assert_eq!(json["genres"], serde_json::json!(["Action", "Fantasy"]));
     assert!(json.get("category_id").is_none());
 }
 

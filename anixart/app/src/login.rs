@@ -31,7 +31,7 @@ impl LoginForm {
         self.password = password;
     }
 
-    pub fn view(&mut self) -> Element<Message> {
+    pub fn view(&mut self) -> Element<'_, Message> {
         let username = TextInput::new(
             &mut self.username_state,
             "Enter your username",

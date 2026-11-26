@@ -1,7 +1,4 @@
-use iced::{
-    Application, Button, Column, Command, Container, Element, Length, Settings,
-    Text,
-};
+use iced::{Application, Command, Element, Settings};
 use std::process::Command as ProcessCommand;
 
 mod login;
@@ -61,7 +58,7 @@ impl Application for AnixartApp {
         Command::none()
     }
 
-    fn view(&mut self) -> Element<Self::Message> {
+    fn view(&mut self) -> Element<'_, Self::Message> {
         self.login_form.view().map(AppMessage::Login)
     }
 }

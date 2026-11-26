@@ -8,7 +8,7 @@ anixart-core = { path = "../anixart-core" }
 parsers = { path = "../parsers" }
 iced = { version = "0.4", features = ["default"] }
 
-[profile.dev.package.anixart]
+[profile.dev]
 panic = "abort"
 
 [profile.release]

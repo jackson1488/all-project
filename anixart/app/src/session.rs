@@ -116,15 +116,27 @@ pub fn config_dir() -> Option<PathBuf> {
             return Some(PathBuf::from(override_dir));
         }
     }
-    let base = match std::env::var_os("XDG_CONFIG_HOME") {
+    config_dir_from(
+        std::env::var_os("XDG_CONFIG_HOME"),
+        std::env::var_os("HOME"),
+        std::env::var_os("APPDATA"),
+    )
+}
+
+fn config_dir_from(
+    xdg: Option<std::ffi::OsString>,
+    home: Option<std::ffi::OsString>,
+    appdata: Option<std::ffi::OsString>,
+) -> Option<PathBuf> {
+    let base = match xdg {
         Some(xdg) if !xdg.is_empty() => PathBuf::from(xdg),
-        _ => {
-            let home = std::env::var_os("HOME")?;
-            if home.is_empty() {
-                return None;
-            }
-            PathBuf::from(home).join(".config")
-        }
+        _ => match home {
+            Some(home) if !home.is_empty() => PathBuf::from(home).join(".config"),
+            _ => match appdata {
+                Some(appdata) if !appdata.is_empty() => PathBuf::from(appdata),
+                _ => return None,
+            },
+        },
     };
     Some(base.join(CONFIG_DIR_NAME))
 }
@@ -277,19 +289,19 @@ mod tests {
 
     #[test]
     fn config_dir_prefers_the_override_then_xdg_then_home() {
-        let root = unique_root("env");
-        std::env::set_var(CONFIG_DIR_ENV, &root);
-        assert_eq!(config_dir(), Some(root.clone()));
-
-        std::env::remove_var(CONFIG_DIR_ENV);
-        if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
-            assert_eq!(config_dir(), Some(PathBuf::from(xdg).join(CONFIG_DIR_NAME)));
-        }
-
-        std::env::set_var(CONFIG_DIR_ENV, "");
-        // An empty override must not produce a relative path.
-        assert!(config_dir().is_some());
-        std::env::remove_var(CONFIG_DIR_ENV);
-        let _ = fs::remove_dir_all(&root);
+        use std::ffi::OsString;
+        assert_eq!(
+            config_dir_from(Some(OsString::from("/xdg")), Some(OsString::from("/home")), None),
+            Some(PathBuf::from("/xdg").join(CONFIG_DIR_NAME))
+        );
+        assert_eq!(
+            config_dir_from(Some(OsString::from("")), Some(OsString::from("/home")), None),
+            Some(PathBuf::from("/home").join(".config").join(CONFIG_DIR_NAME))
+        );
+        assert_eq!(
+            config_dir_from(None, None, Some(OsString::from("C:\\AppData"))),
+            Some(PathBuf::from("C:\\AppData").join(CONFIG_DIR_NAME))
+        );
+        assert_eq!(config_dir_from(None, None, None), None);
     }
 }

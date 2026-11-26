@@ -76,16 +76,16 @@ pub struct FilterRequest {
     #[serde(default)]
     pub sort: i32,
 
-    #[serde(default, alias = "category_id", skip_serializing_if = "Option::is_none")]
+    #[serde(default, alias = "categoryId", skip_serializing_if = "Option::is_none")]
     pub category_id: Option<i64>,
 
-    #[serde(default, alias = "status_id", skip_serializing_if = "Option::is_none")]
+    #[serde(default, alias = "statusId", skip_serializing_if = "Option::is_none")]
     pub status_id: Option<i64>,
 
-    #[serde(default, alias = "start_year", skip_serializing_if = "Option::is_none")]
+    #[serde(default, alias = "startYear", skip_serializing_if = "Option::is_none")]
     pub start_year: Option<i32>,
 
-    #[serde(default, alias = "end_year", skip_serializing_if = "Option::is_none")]
+    #[serde(default, alias = "endYear", skip_serializing_if = "Option::is_none")]
     pub end_year: Option<i32>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -100,36 +100,36 @@ pub struct FilterRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub season: Option<i32>,
 
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, alias = "genresMode", skip_serializing_if = "Option::is_none")]
     pub genres_mode: Option<i32>,
 
-    #[serde(default, alias = "episodes_from", skip_serializing_if = "Option::is_none")]
+    #[serde(default, alias = "episodesFrom", skip_serializing_if = "Option::is_none")]
     pub episodes_from: Option<i32>,
 
-    #[serde(default, alias = "episodes_to", skip_serializing_if = "Option::is_none")]
+    #[serde(default, alias = "episodesTo", skip_serializing_if = "Option::is_none")]
     pub episodes_to: Option<i32>,
 
-    #[serde(default, alias = "episode_duration_from", skip_serializing_if = "Option::is_none")]
+    #[serde(default, alias = "episodeDurationFrom", skip_serializing_if = "Option::is_none")]
     pub episode_duration_from: Option<i32>,
 
-    #[serde(default, alias = "episode_duration_to", skip_serializing_if = "Option::is_none")]
+    #[serde(default, alias = "episodeDurationTo", skip_serializing_if = "Option::is_none")]
     pub episode_duration_to: Option<i32>,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub genres: Vec<String>,
 
-    #[serde(default, alias = "profile_list_exclusions", skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, alias = "profileListExclusions", skip_serializing_if = "Vec::is_empty")]
     pub profile_list_exclusions: Vec<i32>,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub types: Vec<i64>,
 
-    #[serde(default, alias = "age_ratings", skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, alias = "ageRatings", skip_serializing_if = "Vec::is_empty")]
     pub age_ratings: Vec<i32>,
 
     #[serde(
         default,
-        alias = "is_genres_exclude_mode_enabled",
+        alias = "isGenresExcludeModeEnabled",
         skip_serializing_if = "std::ops::Not::not"
     )]
     pub is_genres_exclude_mode_enabled: bool,

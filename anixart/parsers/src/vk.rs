@@ -71,6 +71,21 @@ pub fn extract_video_params(url: &str) -> Option<(String, String, Option<String>
     None
 }
 
+fn urlencoding_encode(s: &str) -> String {
+    let mut encoded = String::new();
+    for b in s.bytes() {
+        match b {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(b as char);
+            }
+            _ => {
+                encoded.push_str(&format!("%{b:02X}"));
+            }
+        }
+    }
+    encoded
+}
+
 fn urlencoding_decode(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     let mut chars = s.chars();
@@ -239,18 +254,18 @@ pub async fn resolve(client: &reqwest::Client, url: &str) -> Result<ParsedVideo,
         None => format!("{oid}_{id}"),
     };
 
-    let params = [
-        ("anonymous_token", anonym_token.as_str()),
-        ("device_id", device_id.as_str()),
-        ("lang", "en"),
-        ("v", "5.244"),
-        ("videos", video_target.as_str()),
-    ];
+    let form_body = format!(
+        "anonymous_token={}&device_id={}&lang=en&v=5.244&videos={}",
+        urlencoding_encode(anonym_token.as_str()),
+        urlencoding_encode(device_id.as_str()),
+        urlencoding_encode(video_target.as_str())
+    );
 
     let get_resp = client
         .post("https://api.vk.com/method/video.get")
         .header("User-Agent", VK_USER_AGENT)
-        .form(&params)
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(form_body)
         .send()
         .await?
         .text()

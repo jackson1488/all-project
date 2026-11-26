@@ -35,18 +35,22 @@ pub enum Message {
     SearchQuery(String),
     SearchSelectIdx(String),
     SearchGo,
+    SearchPage(usize),
     SearchOpenResult,
 
     ReleaseSelected(i64),
     TypeSelected(usize),
     SourceSelected(usize),
     EpisodeSelected(usize),
-    Play(EpisodeInfo),
     OpenType,
     OpenSource,
     OpenEpisode,
     BackToRelease,
     BackToTypes,
+
+    TypeIdxStr(String),
+    SourceIdxStr(String),
+    EpisodeIdxStr(String),
 
     LoginOk(String),
     LoginFail(String),
@@ -95,9 +99,8 @@ async fn search_for(client: AnixartClient, query: String, page: usize) -> Result
 }
 
 async fn release_detail(client: AnixartClient, id: i64) -> Result<Release, String> {
-    client.release(id, true).await
-        .and_then(|r| r.release.ok_or_else(|| "Not found".to_string()))
-        .map_err(|e| e.to_string())
+    let resp = client.release(id, true).await.map_err(|e| e.to_string())?;
+    resp.release.ok_or_else(|| "Not found".to_string())
 }
 
 async fn fetch_types(client: AnixartClient, id: i64) -> Result<Vec<EpisodeType>, String> {

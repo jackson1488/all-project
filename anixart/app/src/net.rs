@@ -183,7 +183,7 @@ pub async fn sign_in_google_browser(
     google_client_id: String,
     firebase_api_key: String,
 ) -> Result<String, String> {
-    let listener = google_callback::Listener::bind().map_err(|e| format!("{e}"))?;
+    let listener = google_callback::Listener::bind().map_err(|e| e.to_string())?;
     let port = listener.port();
     let nonce = random_verifier();
     let url = oauth::google_browser_authorize_url(&google_client_id, port, &nonce);
@@ -243,7 +243,7 @@ pub mod google_callback {
             let std_listener = std::net::TcpListener::bind("127.0.0.1:0")?;
             std_listener.set_nonblocking(true)?;
             let addr = std_listener.local_addr()?;
-            let inner = TcpListener::from_std(&std_listener)?;
+            let inner = TcpListener::from_std(std_listener)?;
             Ok(Self { inner, addr })
         }
 

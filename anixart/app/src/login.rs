@@ -731,7 +731,7 @@ mod tests {
         // An explicit override wins, and so does a custom redirect URI.
         login.google_client_id = "my-own.client.id".into();
         login.firebase_api_key = "AIzaMyOwnKey".into();
-        login.google_redirect = "https://example.invalid/cb";
+        login.google_redirect = "https://example.invalid/cb".into();
         let url = login.prepare_google();
         assert!(url.contains("client_id=my-own.client.id"));
         assert!(url.contains("redirect_uri=https%3A%2F%2Fexample.invalid%2Fcb"));

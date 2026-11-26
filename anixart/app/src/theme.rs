@@ -345,6 +345,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn the_surface_stack_gets_lighter_as_it_rises() {
         assert!(BACKGROUND.r < SURFACE.r);
         assert!(SURFACE.r < CARD.r);
@@ -355,6 +356,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn the_accent_is_warm_and_darker_when_pressed() {
         // coral, not iced blue: red dominates, green sits below it
         assert!(ACCENT.r > ACCENT.g && ACCENT.g > ACCENT.b);

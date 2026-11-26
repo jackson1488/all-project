@@ -20,8 +20,8 @@
 //!   Firebase API key, которые возит с собой APK Anixart, уже вписаны
 //!   (`oauth::GOOGLE_WEB_CLIENT_ID`, `oauth::FIREBASE_API_KEY`), и кнопка
 //!   **«Войти через Google (браузер)»** поднимает loopback-слушатель на
-//!   `127.0.0.1:0`, открывает иммитуый authorize URL, ловит редирект (страница
-//!  -релей читает фрагмент URL и отправляет его обратно POST'ом), меняет
+//!   `127.0.0.1:0`, открывает иммитуый authorize URL, ловит редирект (страница-релей
+//!   читает фрагмент URL и отправляет его обратно POST'ом), меняет
 //!   credencial Google на **Firebase** ID token через
 //!   `identitytoolkit.googleapis.com` `accounts:signInWithIdp` и постит его в
 //!   `auth/google`. Поле вставки остаётся универсальным запасным путём.
@@ -862,8 +862,10 @@ mod tests {
         assert_eq!(vk_access_token("ya29.plain").as_deref(), Some("ya29.plain"));
         assert_eq!(vk_access_token(""), None);
 
-        let mut login = Login::default();
-        login.yandex_paste = "https://yxa980f005.oauth.yandex.ru/auth/finish?access_token=TOK".into();
+        let mut login = Login {
+            yandex_paste: "https://yxa980f005.oauth.yandex.ru/auth/finish?access_token=TOK".into(),
+            ..Default::default()
+        };
         assert_eq!(login.yandex_credential().as_deref(), Some("TOK"));
         login.yandex_paste = "  ".into();
         assert_eq!(login.yandex_credential(), None);

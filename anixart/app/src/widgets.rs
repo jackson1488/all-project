@@ -858,6 +858,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn tile_dimensions_leave_room_for_the_padding() {
         assert!(TILE_WIDTH > 24, "the tile padding must not eat the artwork");
         assert!(TILE_POSTER_HEIGHT > TILE_WIDTH);

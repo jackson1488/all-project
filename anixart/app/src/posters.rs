@@ -524,7 +524,7 @@ mod tests {
     #[test]
     fn placeholder_tints_are_stable_and_vary_between_keys() {
         assert_eq!(placeholder_tint(&release_key(7)), placeholder_tint(&release_key(7)));
-        let keys: Vec<String> = (0..24).map(|id| release_key(id)).collect();
+        let keys: Vec<String> = (0..24).map(release_key).collect();
         let tints: Vec<Color> = keys.iter().map(|key| placeholder_tint(key)).collect();
         let mut distinct = tints.clone();
         distinct.dedup();

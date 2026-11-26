@@ -1,0 +1,24 @@
+{
+  "code": 0,
+  "content": [
+    {
+      "id": 501,
+      "title": "New episode drop",
+      "image": "https://cdn.example/feed1.jpg",
+      "creation_date": 1700001000,
+      "last_update_date": 1700002000,
+      "comment_count": 14,
+      "vote_count": 33,
+      "vote": 1,
+      "is_pinned": false,
+      "channel": {
+        "id": 9,
+        "title": "Anixart News",
+        "avatar": "https://cdn.example/ch.png"
+      }
+    }
+  ],
+  "current_page": 0,
+  "total_count": 1,
+  "total_page_count": 1
+}

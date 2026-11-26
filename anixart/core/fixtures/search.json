@@ -1,0 +1,22 @@
+{
+  "code": 0,
+  "releases": [
+    {
+      "id": 1001,
+      "title_ru": "Клинок, рассекающий демонов",
+      "title_original": "Kimetsu no Yaiba",
+      "grade": 4.7,
+      "image": "https://cdn.example/r1001.jpg"
+    },
+    {
+      "id": 1002,
+      "title_ru": "Атака титанов",
+      "title_original": "Shingeki no Kyojin",
+      "grade": 4.8
+    }
+  ],
+  "related": {
+    "id": 55,
+    "name": "Demon Slayer franchise"
+  }
+}

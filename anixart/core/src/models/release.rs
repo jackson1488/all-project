@@ -1,0 +1,124 @@
+use serde::{Deserialize, Serialize};
+
+/// Release card / catalogue entry.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct Release {
+    #[serde(default)]
+    pub id: i64,
+    #[serde(default)]
+    pub title_ru: Option<String>,
+    #[serde(default)]
+    pub title_original: Option<String>,
+    #[serde(default)]
+    pub title_alt: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub image: Option<String>,
+    #[serde(default)]
+    pub year: Option<String>,
+    #[serde(default)]
+    pub genres: Option<String>,
+    #[serde(default)]
+    pub country: Option<String>,
+    #[serde(default)]
+    pub studio: Option<String>,
+    #[serde(default)]
+    pub author: Option<String>,
+    #[serde(default)]
+    pub director: Option<String>,
+    #[serde(default)]
+    pub translators: Option<String>,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub grade: f64,
+    #[serde(default)]
+    pub rating: i32,
+    #[serde(default)]
+    pub age_rating: i32,
+    #[serde(default)]
+    pub duration: i32,
+    #[serde(default)]
+    pub season: i32,
+    #[serde(default)]
+    pub status_id: i64,
+    #[serde(default)]
+    pub episodes_released: Option<i32>,
+    #[serde(default)]
+    pub episodes_total: Option<i32>,
+    #[serde(default)]
+    pub favorites_count: i32,
+    #[serde(default)]
+    pub comment_count: i64,
+    #[serde(default)]
+    pub vote_count: i32,
+    #[serde(default)]
+    pub is_favorite: bool,
+    #[serde(default)]
+    pub is_adult: bool,
+    #[serde(default)]
+    pub is_viewed: bool,
+    #[serde(default)]
+    pub profile_list_status: i32,
+    #[serde(default)]
+    pub release_date: Option<String>,
+}
+
+/// `GET /release/{id}` envelope.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct ReleaseResponse {
+    #[serde(default)]
+    pub code: i32,
+    #[serde(default)]
+    pub release: Option<Release>,
+}
+
+impl ReleaseResponse {
+    pub fn is_success(&self) -> bool {
+        self.code == 0
+    }
+}
+
+/// Related franchise block occasionally returned by search.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct Related {
+    #[serde(default)]
+    pub id: i64,
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+/// `POST /search/releases/{page}` response.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct ReleaseSearchResponse {
+    #[serde(default)]
+    pub code: i32,
+    #[serde(default)]
+    pub releases: Vec<Release>,
+    #[serde(default)]
+    pub related: Option<Related>,
+}
+
+impl ReleaseSearchResponse {
+    pub fn is_success(&self) -> bool {
+        self.code == 0
+    }
+}
+
+/// Body for release / collection / profile search.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SearchRequest {
+    pub query: String,
+    #[serde(rename = "searchBy")]
+    pub search_by: i32,
+}
+
+impl SearchRequest {
+    pub fn new(query: impl Into<String>) -> Self {
+        Self {
+            query: query.into(),
+            search_by: 0,
+        }
+    }
+}

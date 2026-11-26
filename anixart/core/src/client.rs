@@ -1,0 +1,296 @@
+use std::time::Duration;
+
+use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
+use reqwest::Client;
+use serde::de::DeserializeOwned;
+
+use crate::error::{AnixartError, Result};
+use crate::models::{
+    CodeResponse, CollectionResponse, EpisodeResponse, FeedItem, Pageable, ProfileInfoResponse,
+    ProfileResponse, Release, ReleaseResponse, ReleaseSearchResponse, SearchRequest, SignInResponse,
+    SourcesResponse, TypesResponse,
+};
+use crate::API_BASE_URL;
+
+const DEFAULT_UA: &str =
+    "AnixartApp/10.5-26101718 (Android 14; SDK 34; arm64-v8a; Google Pixel 7; ru)";
+
+/// Async Anixart REST client (reqwest + rustls).
+#[derive(Debug, Clone)]
+pub struct AnixartClient {
+    http: Client,
+    base_url: String,
+    token: Option<String>,
+}
+
+impl AnixartClient {
+    /// Builds a client pointed at the production API base URL.
+    pub fn new() -> Result<Self> {
+        Self::with_base_url(API_BASE_URL)
+    }
+
+    /// Builds a client with a custom base URL (trailing slash optional).
+    pub fn with_base_url(base_url: impl Into<String>) -> Result<Self> {
+        let mut headers = HeaderMap::new();
+        headers.insert(USER_AGENT, HeaderValue::from_static(DEFAULT_UA));
+
+        let http = Client::builder()
+            .default_headers(headers)
+            .timeout(Duration::from_secs(20))
+            .connect_timeout(Duration::from_secs(10))
+            .build()?;
+
+        let mut base_url = base_url.into();
+        if !base_url.ends_with('/') {
+            base_url.push('/');
+        }
+
+        Ok(Self {
+            http,
+            base_url,
+            token: None,
+        })
+    }
+
+    /// Stores the session token appended as `?token=` on subsequent calls.
+    pub fn set_token(&mut self, token: impl Into<String>) {
+        self.token = Some(token.into());
+    }
+
+    /// Clears the stored session token.
+    pub fn clear_token(&mut self) {
+        self.token = None;
+    }
+
+    /// Returns the currently stored token, if any.
+    pub fn token(&self) -> Option<&str> {
+        self.token.as_deref()
+    }
+
+    fn url(&self, path: &str) -> String {
+        let path = path.trim_start_matches('/');
+        format!("{}{path}", self.base_url)
+    }
+
+    fn require_token(&self) -> Result<&str> {
+        self.token
+            .as_deref()
+            .ok_or(AnixartError::MissingToken)
+    }
+
+    fn build_url(&self, path: &str, extra: &[(&str, String)]) -> Result<reqwest::Url> {
+        let mut url = reqwest::Url::parse(&self.url(path))
+            .map_err(|e| AnixartError::Unexpected(e.to_string()))?;
+        {
+            let mut qp = url.query_pairs_mut();
+            if let Some(token) = &self.token {
+                qp.append_pair("token", token);
+            }
+            for (k, v) in extra {
+                qp.append_pair(k, v);
+            }
+        }
+        Ok(url)
+    }
+
+    async fn get_json<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        extra: &[(&str, String)],
+    ) -> Result<T> {
+        let url = self.build_url(path, extra)?;
+        let resp = self.http.get(url).send().await?.error_for_status()?;
+        let body = resp.text().await?;
+        Ok(serde_json::from_str(&body)?)
+    }
+
+    async fn post_json<T: DeserializeOwned, B: serde::Serialize>(
+        &self,
+        path: &str,
+        body: &B,
+        extra_headers: &[(&str, &str)],
+    ) -> Result<T> {
+        let url = self.build_url(path, &[])?;
+        let mut req = self.http.post(url).json(body);
+        for (k, v) in extra_headers {
+            req = req.header(*k, *v);
+        }
+        let resp = req.send().await?.error_for_status()?;
+        let text = resp.text().await?;
+        Ok(serde_json::from_str(&text)?)
+    }
+
+    async fn post_form<T: DeserializeOwned>(&self, path: &str, form: &[(&str, &str)]) -> Result<T> {
+        let url = self.url(path);
+        let encoded: String = form
+            .iter()
+            .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+            .collect::<Vec<_>>()
+            .join("&");
+        let resp = self
+            .http
+            .post(url)
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .body(encoded)
+            .send()
+            .await?
+            .error_for_status()?;
+        let text = resp.text().await?;
+        Ok(serde_json::from_str(&text)?)
+    }
+
+    /// `POST /auth/signIn` — stores the token on success.
+    pub async fn login(&mut self, login: &str, password: &str) -> Result<SignInResponse> {
+        let resp: SignInResponse = self
+            .post_form("auth/signIn", &[("login", login), ("password", password)])
+            .await?;
+        if let Some(token) = resp.token() {
+            self.set_token(token.to_string());
+        }
+        Ok(resp)
+    }
+
+    /// `POST /search/releases/{page}`.
+    pub async fn search(&self, query: &str, page: u32) -> Result<ReleaseSearchResponse> {
+        let body = SearchRequest::new(query);
+        self.post_json(
+            &format!("search/releases/{page}"),
+            &body,
+            &[("API-Version", "v2")],
+        )
+        .await
+    }
+
+    /// `GET /feed/latest/all/{page}`.
+    pub async fn feed(&self, page: u32) -> Result<Pageable<FeedItem>> {
+        self.get_json(&format!("feed/latest/all/{page}"), &[]).await
+    }
+
+    /// `GET /feed/all/{page}` with optional channel filter.
+    pub async fn feed_all(
+        &self,
+        page: u32,
+        channel_id: Option<i64>,
+        date: i32,
+    ) -> Result<Pageable<FeedItem>> {
+        let date_s = date.to_string();
+        let channel_s = channel_id.map(|id| id.to_string());
+        let mut extra: Vec<(&str, String)> = vec![("date", date_s)];
+        if let Some(id) = channel_s {
+            extra.push(("channel_id", id));
+        }
+        self.get_json(&format!("feed/all/{page}"), &extra).await
+    }
+
+    /// `GET /release/{id}`.
+    pub async fn release(&self, id: i64, extended: bool) -> Result<ReleaseResponse> {
+        self.get_json(
+            &format!("release/{id}"),
+            &[("extended_mode", extended.to_string())],
+        )
+        .await
+    }
+
+    /// `GET /episode/{releaseId}` — voiceover / type list.
+    pub async fn types(&self, release_id: i64) -> Result<TypesResponse> {
+        self.get_json(&format!("episode/{release_id}"), &[]).await
+    }
+
+    /// `GET /episode/{releaseId}/{typeId}` — sources for a voiceover.
+    pub async fn sources(&self, release_id: i64, type_id: i64) -> Result<SourcesResponse> {
+        self.get_json(&format!("episode/{release_id}/{type_id}"), &[])
+            .await
+    }
+
+    /// `GET /episode/{releaseId}/{typeId}/{sourceId}` — episodes.
+    pub async fn episodes(
+        &self,
+        release_id: i64,
+        type_id: i64,
+        source_id: i64,
+        sort: i32,
+    ) -> Result<EpisodeResponse> {
+        self.get_json(
+            &format!("episode/{release_id}/{type_id}/{source_id}"),
+            &[("sort", sort.to_string())],
+        )
+        .await
+    }
+
+    /// `GET /favorite/all/{page}`.
+    pub async fn favorites(
+        &self,
+        page: u32,
+        sort: Option<i32>,
+        filter_announce: Option<i32>,
+    ) -> Result<Pageable<Release>> {
+        self.require_token()?;
+        let mut extra: Vec<(&str, String)> = Vec::new();
+        if let Some(s) = sort {
+            extra.push(("sort", s.to_string()));
+        }
+        if let Some(f) = filter_announce {
+            extra.push(("filter_announce", f.to_string()));
+        }
+        self.get_json(&format!("favorite/all/{page}"), &extra).await
+    }
+
+    /// `GET /favorite/add/{id}`.
+    pub async fn favorite_add(&self, release_id: i64) -> Result<CodeResponse> {
+        self.require_token()?;
+        self.get_json(&format!("favorite/add/{release_id}"), &[])
+            .await
+    }
+
+    /// `GET /favorite/delete/{id}`.
+    pub async fn favorite_delete(&self, release_id: i64) -> Result<CodeResponse> {
+        self.require_token()?;
+        self.get_json(&format!("favorite/delete/{release_id}"), &[])
+            .await
+    }
+
+    /// `GET /history/{page}`.
+    pub async fn history(&self, page: u32) -> Result<Pageable<Release>> {
+        self.require_token()?;
+        self.get_json(&format!("history/{page}"), &[]).await
+    }
+
+    /// `GET /history/add/{r_id}/{s_id}/{position}`.
+    pub async fn history_add(
+        &self,
+        release_id: i64,
+        source_id: i64,
+        position: i32,
+    ) -> Result<CodeResponse> {
+        self.require_token()?;
+        self.get_json(
+            &format!("history/add/{release_id}/{source_id}/{position}"),
+            &[],
+        )
+        .await
+    }
+
+    /// `GET /history/delete/{r_id}`.
+    pub async fn history_delete(&self, release_id: i64) -> Result<CodeResponse> {
+        self.require_token()?;
+        self.get_json(&format!("history/delete/{release_id}"), &[])
+            .await
+    }
+
+    /// `GET /profile/info`.
+    pub async fn profile_info(&self) -> Result<ProfileInfoResponse> {
+        self.require_token()?;
+        self.get_json("profile/info", &[]).await
+    }
+
+    /// `GET /profile/{id}`.
+    pub async fn profile(&self, id: i64) -> Result<ProfileResponse> {
+        self.get_json(&format!("profile/{id}"), &[]).await
+    }
+
+    /// `GET /collection/{id}`.
+    pub async fn collection(&self, id: i64) -> Result<CollectionResponse> {
+        self.get_json(&format!("collection/{id}"), &[]).await
+    }
+}
+

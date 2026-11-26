@@ -1,0 +1,23 @@
+{
+  "code": 0,
+  "types": [
+    {
+      "id": 11,
+      "name": "AniLibria",
+      "icon": "https://cdn.example/al.png",
+      "workers": "AniLibria Team",
+      "episodes_count": 26,
+      "view_count": 10000,
+      "quality": 1080,
+      "pinned": true,
+      "is_sub": false
+    },
+    {
+      "id": 12,
+      "name": "SubsOnly",
+      "episodes_count": 26,
+      "is_sub": true,
+      "pinned": false
+    }
+  ]
+}

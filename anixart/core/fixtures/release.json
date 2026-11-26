@@ -1,0 +1,26 @@
+{
+  "code": 0,
+  "release": {
+    "id": 1001,
+    "title_ru": "Клинок, рассекающий демонов",
+    "title_original": "Kimetsu no Yaiba",
+    "title_alt": "Demon Slayer",
+    "description": "Tanjiro fights demons.",
+    "image": "https://cdn.example/r1001.jpg",
+    "year": "2019",
+    "genres": "Action, Fantasy",
+    "grade": 4.7,
+    "rating": 5,
+    "age_rating": 16,
+    "episodes_released": 26,
+    "episodes_total": 26,
+    "favorites_count": 9000,
+    "comment_count": 120,
+    "vote_count": 500,
+    "is_favorite": true,
+    "is_adult": false,
+    "profile_list_status": 2,
+    "status_id": 1,
+    "studio": "ufotable"
+  }
+}

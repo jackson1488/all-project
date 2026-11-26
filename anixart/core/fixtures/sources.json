@@ -1,0 +1,17 @@
+{
+  "code": 0,
+  "sources": [
+    {
+      "id": 201,
+      "name": "Kodik",
+      "episodes_count": 26,
+      "quality": 1080
+    },
+    {
+      "id": 202,
+      "name": "Sibnet",
+      "episodes_count": 26,
+      "quality": 720
+    }
+  ]
+}

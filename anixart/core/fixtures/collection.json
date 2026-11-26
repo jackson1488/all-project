@@ -1,0 +1,31 @@
+{
+  "code": 0,
+  "collection": {
+    "id": 77,
+    "title": "Best of shonen",
+    "description": "Curated list",
+    "image": "https://cdn.example/col.png",
+    "comment_count": 4,
+    "favorites_count": 88,
+    "creation_date": 1600000000,
+    "last_update_date": 1700000000,
+    "is_favorite": false,
+    "is_private": false,
+    "creator": {
+      "id": 42,
+      "login": "neko",
+      "avatar": "https://cdn.example/a.png"
+    },
+    "releases": [
+      {
+        "id": 1001,
+        "title_ru": "Клинок, рассекающий демонов"
+      }
+    ]
+  },
+  "watching_count": 1,
+  "plan_count": 0,
+  "completed_count": 0,
+  "hold_on_count": 0,
+  "dropped_count": 0
+}

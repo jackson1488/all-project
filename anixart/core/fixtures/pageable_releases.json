@@ -1,0 +1,20 @@
+{
+  "code": 0,
+  "content": [
+    {
+      "id": 1001,
+      "title_ru": "Клинок, рассекающий демонов",
+      "grade": 4.7,
+      "is_favorite": true
+    },
+    {
+      "id": 1003,
+      "title_ru": "Ванпанчмен",
+      "grade": 4.5,
+      "is_favorite": true
+    }
+  ],
+  "current_page": 0,
+  "total_count": 2,
+  "total_page_count": 1
+}

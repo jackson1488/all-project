@@ -1,205 +1,204 @@
-use iced::{button, scrollable, text_input, Button, Column, Element, Length, Row, Scrollable, Text, TextInput};
+//! Release page: voiceovers (types) → sources → episodes → mpv playback.
 
 use anixart_core::{Episode, EpisodeType, Release, Source};
+use iced::widget::{button, container, horizontal_space, scrollable, text, Column, Row};
+use iced::{Element, Length};
 
-#[derive(Debug, Clone)]
-pub enum Message {
-    TypeIdx(String),
-    SourceIdx(String),
-    EpisodeIdx(String),
-    OpenType,
-    OpenSource,
-    OpenEpisode,
-    BackToRelease,
-    BackToSources,
-}
+use crate::app::Message;
 
-pub struct ReleaseScreen {
+/// State of the release page and of the current drill-down selection.
+#[derive(Debug, Default)]
+pub struct ReleaseView {
     pub release: Option<Release>,
+    pub loading: bool,
     pub types: Vec<EpisodeType>,
-    pub sources: Vec<Source>,
-    pub episodes: Vec<Episode>,
-    pub selected_type_idx: Option<usize>,
-    pub selected_source_idx: Option<usize>,
     pub loading_types: bool,
+    pub selected_type: Option<usize>,
+    pub sources: Vec<Source>,
     pub loading_sources: bool,
+    pub selected_source: Option<usize>,
+    pub episodes: Vec<Episode>,
     pub loading_episodes: bool,
-    pub error: Option<String>,
-    scroll: scrollable::State,
-
-    type_idx_input: text_input::State,
-    pub type_idx_str: String,
-    source_idx_input: text_input::State,
-    pub source_idx_str: String,
-    episode_idx_input: text_input::State,
-    pub episode_idx_str: String,
-
-    open_type_btn: button::State,
-    open_source_btn: button::State,
-    open_episode_btn: button::State,
-    back_btn: button::State,
+    pub pending: Option<usize>,
+    pub playing: Option<usize>,
 }
 
-impl ReleaseScreen {
-    pub fn new() -> Self {
-        Self {
-            release: None,
-            types: Vec::new(),
-            sources: Vec::new(),
-            episodes: Vec::new(),
-            selected_type_idx: None,
-            selected_source_idx: None,
-            loading_types: false,
-            loading_sources: false,
-            loading_episodes: false,
-            error: None,
-            scroll: scrollable::State::new(),
-            type_idx_input: text_input::State::new(),
-            type_idx_str: String::new(),
-            source_idx_input: text_input::State::new(),
-            source_idx_str: String::new(),
-            episode_idx_input: text_input::State::new(),
-            episode_idx_str: String::new(),
-            open_type_btn: button::State::new(),
-            open_source_btn: button::State::new(),
-            open_episode_btn: button::State::new(),
-            back_btn: button::State::new(),
-        }
-    }
+impl ReleaseView {
+    pub fn view(&self) -> Element<'_, Message> {
+        let Some(release) = &self.release else {
+            let label = if self.loading {
+                "Loading release…"
+            } else {
+                "No release selected — open one from Search."
+            };
+            return container(text(label).size(16))
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
+                .into();
+        };
 
-    pub fn view(&mut self) -> Element<'_, Message> {
-        let mut col = Column::new();
+        let title = release
+            .title_ru
+            .clone()
+            .or_else(|| release.title_original.clone())
+            .unwrap_or_else(|| "(untitled)".to_owned());
+        let original = release.title_original.clone().unwrap_or_default();
+        let description = release
+            .description
+            .clone()
+            .unwrap_or_else(|| "(no description)".to_owned());
+        let year = release.year.clone().unwrap_or_else(|| "—".to_owned());
+        let grade = release.grade;
+        let age = release.age_rating;
+        let released = release.episodes_released.unwrap_or(0);
+        let total = release.episodes_total.unwrap_or(0);
 
-        if let Some(ref rel) = self.release {
-            let title_ru = rel.title_ru.as_deref().unwrap_or("(no ru title)");
-            let title_orig = rel.title_original.as_deref().unwrap_or("");
-            let desc = rel.description.as_deref().unwrap_or("(no description)");
-            let grade = rel.grade;
-            let year = rel.year.as_deref().unwrap_or("?");
-            let age = rel.age_rating;
-
-            col = col
-                .push(Text::new(title_ru).size(22))
-                .push(Text::new(title_orig).size(16).color([0.5, 0.5, 0.5]))
-                .push(Text::new(format!("Rating: {grade} | Year: {year} | Age: {age}")))
-                .push(Text::new(desc).size(13));
-
-            if let Some(err) = &self.error {
-                col = col.push(Text::new(err).color([1.0, 0.0, 0.0]));
-            }
-
-            // Types / Voiceovers
-            if !self.types.is_empty() {
-                col = col.push(Text::new("— Voiceovers —").size(16));
-                for (i, t) in self.types.iter().enumerate() {
-                    let marker = if self.selected_type_idx == Some(i) { " ✓" } else { "" };
-                    let name = &t.name;
-                    let count = t.episodes_count;
-                    let sub = t.is_sub;
-                    let label = format!("[{i}] {name}{marker} ({count} ep, sub: {sub})");
-                    col = col.push(Text::new(label).size(13));
-                }
-                let row = Row::new()
+        let mut body = Column::new().spacing(10).push(
+            container(
+                Column::new()
+                    .spacing(4)
+                    .push(text(title).size(24))
+                    .push(text(original).size(14).color([0.6, 0.6, 0.7]))
                     .push(
-                        TextInput::new(
-                            &mut self.type_idx_input,
-                            "#",
-                            &self.type_idx_str,
-                            Message::TypeIdx,
-                        )
-                        .size(13)
-                        .width(Length::Units(60)),
+                        text(format!(
+                            "rating {grade:.1} · {year} · {age}+ · {released}/{total} episodes"
+                        ))
+                        .size(13),
                     )
-                    .push(
-                        Button::new(&mut self.open_type_btn, Text::new("Select"))
-                            .on_press(Message::OpenType),
-                    );
-                col = col.push(row);
-            } else if self.loading_types {
-                col = col.push(Text::new("Loading voiceovers…"));
-            }
+                    .push(text(description).size(13)),
+            )
+            .padding(14)
+            .style(container::rounded_box),
+        );
 
-            // Sources
-            if self.selected_type_idx.is_some() && !self.sources.is_empty() {
-                col = col.push(Text::new("—— Sources ——").size(16));
-                for (i, s) in self.sources.iter().enumerate() {
-                    let marker = if self.selected_source_idx == Some(i) { " ✓" } else { "" };
-                    let name = &s.name;
-                    let count = s.episodes_count;
-                    let label = format!("[{i}] {name}{marker} ({count} ep)");
-                    col = col.push(Text::new(label).size(13));
-                }
-                let row = Row::new()
-                    .push(
-                        TextInput::new(
-                            &mut self.source_idx_input,
-                            "#",
-                            &self.source_idx_str,
-                            Message::SourceIdx,
-                        )
-                        .size(13)
-                        .width(Length::Units(60)),
-                    )
-                    .push(
-                        Button::new(&mut self.open_source_btn, Text::new("Select"))
-                            .on_press(Message::OpenSource),
-                    );
-                col = col.push(row);
-            } else if self.selected_type_idx.is_some() && self.loading_sources {
-                col = col.push(Text::new("Loading sources…"));
-            }
+        // ── Voiceovers ─────────────────────────────────────────────────────
+        let voiceovers = self.types.len();
+        body = body.push(text(format!("Voiceovers ({voiceovers})")).size(18));
 
-            // Episodes
-            if self.selected_source_idx.is_some() && !self.episodes.is_empty() {
-                col = col.push(Text::new("——— Episodes ———").size(16));
-                for (i, ep) in self.episodes.iter().enumerate() {
-                    let position = ep.position;
-                    let default_name = format!("Ep #{position}");
-                    let ep_name = ep.name.as_deref().unwrap_or(&default_name);
-                    let watched = if ep.is_watched { " ✓" } else { "" };
-                    let label = format!("[{i}] {ep_name}{watched}");
-                    col = col.push(Text::new(label).size(13));
-                }
-                let row = Row::new()
-                    .push(
-                        TextInput::new(
-                            &mut self.episode_idx_input,
-                            "#",
-                            &self.episode_idx_str,
-                            Message::EpisodeIdx,
-                        )
-                        .size(13)
-                        .width(Length::Units(60)),
-                    )
-                    .push(
-                        Button::new(&mut self.open_episode_btn, Text::new("Play"))
-                            .on_press(Message::OpenEpisode),
-                    );
-                col = col.push(row);
-            } else if self.selected_source_idx.is_some() && self.loading_episodes {
-                col = col.push(Text::new("Loading episodes…"));
-            }
-
-            // Back navigation
-            if self.selected_source_idx.is_some() {
-                col = col.push(
-                    Button::new(&mut self.back_btn, Text::new("← Back to sources"))
-                        .on_press(Message::BackToSources),
-                );
-            } else if self.selected_type_idx.is_some() {
-                col = col.push(
-                    Button::new(&mut self.back_btn, Text::new("← Back to types"))
-                        .on_press(Message::BackToRelease),
-                );
-            }
-        } else {
-            col = col.push(Text::new("No release loaded"));
+        if self.types.is_empty() {
+            let label = if self.loading_types {
+                "Loading voiceovers…"
+            } else {
+                "No voiceovers available."
+            };
+            body = body.push(text(label).color([0.6, 0.6, 0.7]));
         }
 
-        Scrollable::new(&mut self.scroll)
-            .push(col)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+        for (index, ty) in self.types.iter().enumerate() {
+            let active = self.selected_type == Some(index);
+            let marker = if active { "✓ " } else { "" };
+            let name = ty.name.clone();
+            let episodes = ty.episodes_count;
+            let quality = ty.quality;
+            let sub = if ty.is_sub { " · subs" } else { "" };
+            let choose = (!active).then_some(Message::SelectType(index));
+
+            body = push_row(
+                body,
+                format!("{marker}{name}"),
+                format!("{episodes} episodes · quality {quality}{sub}"),
+                "Choose",
+                choose,
+            );
+        }
+
+        // ── Sources ────────────────────────────────────────────────────────
+        if self.selected_type.is_some() {
+            let sources = self.sources.len();
+            body = body.push(text(format!("Sources ({sources})")).size(18));
+
+            if self.sources.is_empty() {
+                let label = if self.loading_sources {
+                    "Loading sources…"
+                } else {
+                    "No sources for this voiceover."
+                };
+                body = body.push(text(label).color([0.6, 0.6, 0.7]));
+            }
+
+            for (index, source) in self.sources.iter().enumerate() {
+                let active = self.selected_source == Some(index);
+                let marker = if active { "✓ " } else { "" };
+                let name = source.name.clone();
+                let episodes = source.episodes_count;
+                let quality = source.quality;
+                let choose = (!active).then_some(Message::SelectSource(index));
+
+                body = push_row(
+                    body,
+                    format!("{marker}{name}"),
+                    format!("{episodes} episodes · quality {quality}"),
+                    "Choose",
+                    choose,
+                );
+            }
+        }
+
+        // ── Episodes ───────────────────────────────────────────────────────
+        if self.selected_source.is_some() {
+            let episodes = self.episodes.len();
+            body = body.push(text(format!("Episodes ({episodes})")).size(18));
+
+            if self.episodes.is_empty() {
+                let label = if self.loading_episodes {
+                    "Loading episodes…"
+                } else {
+                    "No episodes for this source."
+                };
+                body = body.push(text(label).color([0.6, 0.6, 0.7]));
+            }
+
+            for (index, episode) in self.episodes.iter().enumerate() {
+                let position = episode.position;
+                let name = episode
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| format!("Episode {position}"));
+                let watched = if episode.is_watched { " · watched" } else { "" };
+                let quality = episode.quality;
+                let marker = if self.playing == Some(index) {
+                    "▶ "
+                } else if self.pending == Some(index) {
+                    "⋯ "
+                } else {
+                    ""
+                };
+                let play = self.pending.is_none().then_some(Message::PlayEpisode(index));
+
+                body = push_row(
+                    body,
+                    format!("{marker}{name}"),
+                    format!("ep {position} · quality {quality}{watched}"),
+                    "Play in mpv",
+                    play,
+                );
+            }
+        }
+
+        body = body.push(button("← Back").on_press(Message::ReleaseBack));
+
+        scrollable(body).height(Length::Fill).into()
     }
+}
+
+/// Appends one selectable list entry: title + metadata on the left, action on the right.
+fn push_row<'a>(
+    body: Column<'a, Message>,
+    title: String,
+    meta: String,
+    action: &'static str,
+    on_press: Option<Message>,
+) -> Column<'a, Message> {
+    body.push(
+        Row::new()
+            .spacing(10)
+            .push(
+                Column::new()
+                    .spacing(2)
+                    .push(text(title).size(15))
+                    .push(text(meta).size(12).color([0.6, 0.6, 0.7])),
+            )
+            .push(horizontal_space())
+            .push(button(action).on_press_maybe(on_press)),
+    )
 }

@@ -1,62 +1,91 @@
-use iced::{button, scrollable, Button, Column, Element, Length, Scrollable, Text};
+//! Feed screen: latest Anixart articles with pagination.
 
 use anixart_core::FeedItem;
+use iced::widget::{button, container, horizontal_space, scrollable, text, Column, Row};
+use iced::{Element, Length};
 
-#[derive(Debug, Clone)]
-pub enum Message {
-    FeedPage(usize),
-}
+use crate::app::Message;
 
-pub struct FeedScreen {
+/// Feed state (one page of articles at a time).
+#[derive(Debug, Default)]
+pub struct Feed {
     pub items: Vec<FeedItem>,
     pub page: usize,
+    pub total_pages: usize,
     pub loading: bool,
-    pub error: Option<String>,
-    scroll: scrollable::State,
-    next_btn: button::State,
 }
 
-impl FeedScreen {
-    pub fn new() -> Self {
-        Self {
-            items: Vec::new(),
-            page: 0,
-            loading: false,
-            error: None,
-            scroll: scrollable::State::new(),
-            next_btn: button::State::new(),
-        }
-    }
-
-    pub fn view(&mut self) -> Element<'_, Message> {
+impl Feed {
+    pub fn view(&self) -> Element<'_, Message> {
         let page = self.page;
-        let mut col = Column::new().push(Text::new(format!("Feed — page {page}")).size(20));
+        let total_pages = self.total_pages;
+        let page_number = page + 1;
 
-        if let Some(err) = &self.error {
-            col = col.push(Text::new(err).color([1.0, 0.0, 0.0]));
-        }
+        let mut body = Column::new().spacing(8).push(
+            Row::new()
+                .spacing(10)
+                .push(text(format!("Feed — page {page_number} of {total_pages}")).size(18))
+                .push(horizontal_space()),
+        );
 
         if self.loading {
-            col = col.push(Text::new("Loading…"));
+            body = body.push(text("Loading feed…").color([0.6, 0.6, 0.7]));
+        }
+
+        if self.items.is_empty() && !self.loading {
+            body = body.push(
+                text("No articles yet — sign in and open the Feed tab.")
+                    .color([0.6, 0.6, 0.7]),
+            );
         }
 
         for item in &self.items {
-            let title = item.title.as_deref().unwrap_or("(no title)");
-            let created = &item.creation_date;
+            let title = item
+                .title
+                .clone()
+                .unwrap_or_else(|| "(no title)".to_owned());
+            let channel = item
+                .channel
+                .as_ref()
+                .and_then(|c| c.title.clone().or_else(|| c.name.clone()))
+                .unwrap_or_else(|| "Anixart".to_owned());
+            let created = item.creation_date;
             let votes = item.vote_count;
-            let label = format!("[{created}] {title} (votes: {votes})");
-            col = col.push(Text::new(label).size(14));
+            let comments = item.comment_count;
+
+            body = body.push(
+                container(
+                    Column::new().spacing(4).push(text(title).size(16)).push(
+                        text(format!("{channel} · published {created} · ▲ {votes} · 💬 {comments}"))
+                            .size(12)
+                            .color([0.6, 0.6, 0.7]),
+                    ),
+                )
+                .padding(12)
+                .style(container::rounded_box),
+            );
         }
 
-        col = col.push(
-            Button::new(&mut self.next_btn, Text::new("Next page"))
-                .on_press(Message::FeedPage(self.page + 1)),
+        let has_prev = page > 0;
+        let has_next = total_pages == 0 || page + 1 < total_pages;
+        let prev = if has_prev {
+            Some(Message::FeedPage(page - 1))
+        } else {
+            None
+        };
+        let next = if has_next {
+            Some(Message::FeedPage(page + 1))
+        } else {
+            None
+        };
+
+        body = body.push(
+            Row::new()
+                .spacing(10)
+                .push(button("← Prev").on_press_maybe(prev))
+                .push(button("Next →").on_press_maybe(next)),
         );
 
-        Scrollable::new(&mut self.scroll)
-            .push(col)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+        scrollable(body).height(Length::Fill).into()
     }
 }

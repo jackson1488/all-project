@@ -18,7 +18,9 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libxkbcommon-dev mpv
+          # libxkbcommon / wayland / x11 headers: iced 0.13 -> winit 0.30 windowing
+          # backends. mpv: the player the app shells out to for playback.
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev pkg-config mpv
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy

@@ -1,106 +1,104 @@
-use iced::{button, scrollable, text_input, Button, Column, Element, Length, Row, Scrollable, Text, TextInput};
+//! Search screen: release query, numbered results, and page stepping.
 
 use anixart_core::Release;
+use iced::widget::{
+    button, container, horizontal_space, scrollable, text, text_input, Column, Row,
+};
+use iced::{Element, Length};
 
-#[derive(Debug, Clone)]
-pub enum Message {
-    QueryChanged(String),
-    Search,
-    SetPage(usize),
-    SelectResultIdx(String),
-    OpenResult,
-}
+use crate::app::Message;
 
-pub struct SearchScreen {
+/// Search state (query + one page of results).
+#[derive(Debug, Default)]
+pub struct Search {
     pub query: String,
     pub results: Vec<Release>,
     pub page: usize,
     pub loading: bool,
-    pub error: Option<String>,
-    query_state: text_input::State,
-    search_btn: button::State,
-    scroll: scrollable::State,
-    selected_idx_input: text_input::State,
-    pub selected_idx_str: String,
-    open_btn: button::State,
-    next_btn: button::State,
 }
 
-impl SearchScreen {
-    pub fn new() -> Self {
-        Self {
-            query: String::new(),
-            results: Vec::new(),
-            page: 0,
-            loading: false,
-            error: None,
-            query_state: text_input::State::new(),
-            search_btn: button::State::new(),
-            scroll: scrollable::State::new(),
-            selected_idx_input: text_input::State::new(),
-            selected_idx_str: String::new(),
-            open_btn: button::State::new(),
-            next_btn: button::State::new(),
-        }
-    }
+impl Search {
+    pub fn view(&self) -> Element<'_, Message> {
+        let page = self.page;
+        let loading = self.loading;
 
-    pub fn view(&mut self) -> Element<'_, Message> {
-        let input = TextInput::new(
-            &mut self.query_state,
-            "Search releases…",
-            &self.query,
-            Message::QueryChanged,
+        let input = text_input("Search releases…", &self.query)
+            .on_input(Message::SearchQuery)
+            .on_submit(Message::SearchSubmit)
+            .padding(10);
+
+        let submit = if loading {
+            button("Searching…").padding(10)
+        } else {
+            button("Search").padding(10).on_press(Message::SearchSubmit)
+        };
+
+        let mut body = Column::new()
+            .spacing(8)
+            .push(Row::new().spacing(10).push(input).push(submit));
+
+        if loading {
+            body = body.push(text("Searching…").color([0.6, 0.6, 0.7]));
+        }
+
+        if self.results.is_empty() && !loading {
+            body = body.push(
+                text("Type a query and press Enter — releases open on the right tab.")
+                    .color([0.6, 0.6, 0.7]),
+            );
+        }
+
+        for (index, release) in self.results.iter().enumerate() {
+            let number = index + 1;
+            let title = release
+                .title_ru
+                .clone()
+                .or_else(|| release.title_original.clone())
+                .unwrap_or_else(|| "(untitled)".to_owned());
+            let original = release.title_original.clone().unwrap_or_default();
+            let year = release.year.clone().unwrap_or_else(|| "—".to_owned());
+            let grade = release.grade;
+            let age = release.age_rating;
+            let id = release.id;
+
+            body = body.push(
+                container(
+                    Row::new()
+                        .spacing(10)
+                        .push(
+                            Column::new().spacing(2).push(text(title).size(16)).push(
+                                text(format!("#{number} {original} · {year} · rating {grade:.1} · {age}+"))
+                                    .size(12)
+                                    .color([0.6, 0.6, 0.7]),
+                            ),
+                        )
+                        .push(horizontal_space())
+                        .push(button("Open").on_press(Message::OpenRelease(id))),
+                )
+                .padding(12)
+                .style(container::rounded_box),
+            );
+        }
+
+        let has_results = !self.results.is_empty();
+        let prev = if page > 0 {
+            Some(Message::SearchPage(page - 1))
+        } else {
+            None
+        };
+        let next = if has_results {
+            Some(Message::SearchPage(page + 1))
+        } else {
+            None
+        };
+
+        body = body.push(
+            Row::new()
+                .spacing(10)
+                .push(button("← Prev").on_press_maybe(prev))
+                .push(button("Next →").on_press_maybe(next)),
         );
 
-        let mut col = Column::new()
-            .push(Text::new("Search").size(20))
-            .push(Row::new().push(input).push(
-                Button::new(&mut self.search_btn, Text::new("Search"))
-                    .on_press(Message::Search),
-            ));
-
-        if let Some(err) = &self.error {
-            col = col.push(Text::new(err).color([1.0, 0.0, 0.0]));
-        }
-
-        if self.loading {
-            col = col.push(Text::new("Searching…"));
-        }
-
-        // Show results as numbered text
-        for (i, rel) in self.results.iter().enumerate() {
-            let title = rel.title_ru.as_deref().unwrap_or("(no title)");
-            let year = rel.year.as_deref().unwrap_or("?");
-            let grade = rel.grade;
-            let label = format!("[{i}] {title} ({year}) — {grade:.1}");
-            col = col.push(Text::new(label).size(14));
-        }
-
-        if !self.results.is_empty() {
-            let idx_input = TextInput::new(
-                &mut self.selected_idx_input,
-                "Enter # to open",
-                &self.selected_idx_str,
-                Message::SelectResultIdx,
-            ).size(14).width(Length::Units(120));
-            col = col.push(
-                Row::new()
-                    .push(idx_input)
-                    .push(
-                        Button::new(&mut self.open_btn, Text::new("Open"))
-                            .on_press(Message::OpenResult),
-                    ),
-            );
-            col = col.push(
-                Button::new(&mut self.next_btn, Text::new("Next page"))
-                    .on_press(Message::SetPage(self.page + 1)),
-            );
-        }
-
-        Scrollable::new(&mut self.scroll)
-            .push(col)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+        scrollable(body).height(Length::Fill).into()
     }
 }

@@ -1,88 +1,56 @@
-use iced::{button, text_input, Button, Column, Container, Element, Length, Text, TextInput};
+//! Login screen: username / password form backed by `POST /auth/signin`.
 
-#[derive(Debug, Clone)]
-pub enum Message {
-    UsernameChanged(String),
-    PasswordChanged(String),
-    Login,
-}
+use iced::widget::{button, container, text, text_input, Column};
+use iced::{Element, Length};
 
-pub struct LoginForm {
+use crate::app::Message;
+
+/// Credentials form state.
+#[derive(Debug, Default)]
+pub struct Login {
     pub username: String,
     pub password: String,
-    username_state: text_input::State,
-    password_state: text_input::State,
-    login_state: button::State,
-    pub error: Option<String>,
     pub loading: bool,
 }
 
-impl LoginForm {
-    pub fn new() -> Self {
-        Self::default()
-    }
+impl Login {
+    pub fn view(&self) -> Element<'_, Message> {
+        let username = text_input("Username or e-mail", &self.username)
+            .on_input(Message::LoginUsername)
+            .on_submit(Message::LoginSubmit)
+            .padding(10);
 
-    pub fn set_username(&mut self, username: String) {
-        self.username = username;
-    }
+        let password = text_input("Password", &self.password)
+            .secure(true)
+            .on_input(Message::LoginPassword)
+            .on_submit(Message::LoginSubmit)
+            .padding(10);
 
-    pub fn set_password(&mut self, password: String) {
-        self.password = password;
-    }
-
-    pub fn view(&mut self) -> Element<'_, Message> {
-        let username = TextInput::new(
-            &mut self.username_state,
-            "Enter your username",
-            &self.username,
-            Message::UsernameChanged,
-        );
-        let password = TextInput::new(
-            &mut self.password_state,
-            "Enter your password",
-            &self.password,
-            Message::PasswordChanged,
-        )
-        .password();
-
-        let login_btn = if self.loading {
-            Button::new(&mut self.login_state, Text::new("Logging in..."))
+        let submit = if self.loading {
+            button("Logging in…").width(Length::Fill).padding(10)
         } else {
-            Button::new(&mut self.login_state, Text::new("Login"))
-                .on_press(Message::Login)
+            button("Login")
+                .width(Length::Fill)
+                .padding(10)
+                .on_press(Message::LoginSubmit)
         };
 
-        let mut content = Column::new()
-            .push(Text::new("Username:"))
-            .push(username)
-            .push(Text::new("Password:"))
-            .push(password);
-
-        if let Some(err) = &self.error {
-            content = content.push(Text::new(err).color([1.0, 0.0, 0.0]));
-        }
-
-        content = content.push(login_btn);
-
-        Container::new(content)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .center_x()
-            .center_y()
-            .into()
-    }
-}
-
-impl Default for LoginForm {
-    fn default() -> Self {
-        Self {
-            username: String::new(),
-            password: String::new(),
-            username_state: text_input::State::new(),
-            password_state: text_input::State::new(),
-            login_state: button::State::new(),
-            error: None,
-            loading: false,
-        }
+        container(
+            Column::new()
+                .spacing(10)
+                .max_width(380)
+                .push(text("Anixart").size(30))
+                .push(
+                    text("Sign in to reach your feed and collections")
+                        .size(14)
+                        .color([0.6, 0.6, 0.7]),
+                )
+                .push(username)
+                .push(password)
+                .push(submit),
+        )
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
+        .into()
     }
 }

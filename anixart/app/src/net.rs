@@ -265,12 +265,11 @@ pub mod google_callback {
                 .accept()
                 .await
                 .map_err(|e| format!("Google callback listener: {e}"))?;
-            match handle(stream).await {
-                Ok(Some(payload)) => return Ok(payload),
-                // `Ok(None)` = the relay page was served, `Err(_)` = the client hung
-                // up mid-request. Neither ends the wait: browsers routinely open more
-                // than one connection (favicons, reloads, redirects) to this origin.
-                _ => {}
+            // `Ok(None)` = the relay page was served, `Err(_)` = the client hung
+            // up mid-request. Neither ends the wait: browsers routinely open more
+            // than one connection (favicons, reloads, redirects) to this origin.
+            if let Ok(Some(payload)) = handle(stream).await {
+                return Ok(payload);
             }
         }
     }
@@ -368,7 +367,7 @@ pub mod google_callback {
     /// `method`, `path`, `Content-Length`.
     fn parse_head(head: &str) -> Option<(String, String, usize)> {
         let mut lines = head.lines();
-        let mut parts = lines.next()?.trim().split_whitespace();
+        let mut parts = lines.next()?.split_whitespace();
         let method = parts.next()?.to_ascii_uppercase();
         let path = parts.next()?.to_owned();
 

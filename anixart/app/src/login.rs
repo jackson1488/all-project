@@ -536,7 +536,7 @@ fn pick(value: &str, fallback: &str) -> String {
 /// Reads `key` out of a bare query / fragment payload (`#id_token=…&state=…`,
 /// `?code=…`, `code=…`) by rebuilding it as a URL.
 fn param_in_pairs(pairs: &str, key: &str) -> Option<String> {
-    let query = pairs.trim_start_matches(|c| matches!(c, '#' | '?' | '&'));
+    let query = pairs.trim_start_matches(['#', '?', '&']);
     let url = reqwest::Url::parse(&format!("https://anixart.invalid/?{query}")).ok()?;
     let (_, value) = url.query_pairs().find(|(name, _)| name == key)?;
     Some(value.into_owned())

@@ -628,7 +628,8 @@ mod tests {
             assert_eq!(tab.index(), index);
             assert_eq!(BookmarkTab::from_index(index), *tab);
         }
-        assert_eq!(BookmarkTab::from_index(8), BookmarkTab::Dropped);
+        assert_eq!(BookmarkTab::from_index(7), BookmarkTab::Dropped);
+        assert_eq!(BookmarkTab::from_index(8), BookmarkTab::Favorites);
         assert_eq!(BookmarkTab::from_index(usize::MAX), BookmarkTab::Favorites);
     }
 

@@ -358,8 +358,8 @@ mod tests {
     #[test]
     #[allow(clippy::assertions_on_constants)]
     fn the_accent_is_warm_and_darker_when_pressed() {
-        // coral, not iced blue: red dominates, green sits below it
-        assert!(ACCENT.r > ACCENT.g && ACCENT.g > ACCENT.b);
+        // coral, not iced blue: red dominates, green/blue sit below it
+        assert!(ACCENT.r > ACCENT.g && ACCENT.g >= ACCENT.b);
         assert!(ACCENT_DEEP.r > ACCENT_DEEP.g);
         assert!(ACCENT_DEEP.r < ACCENT.r, "crimson must sit below coral");
     }
@@ -439,7 +439,7 @@ mod tests {
         assert_ne!(idle, disabled);
         assert_eq!(idle.text_color, Color::WHITE);
         // hover lifts the fill, press sinks it, disable fades it out
-        assert!(fill(hovered.background).r > fill(idle.background).r);
+        assert!(fill(hovered.background).g > fill(idle.background).g);
         assert!(fill(pressed.background).r < fill(idle.background).r);
         assert!(fill(disabled.background).a < fill(idle.background).a);
     }

@@ -80,12 +80,12 @@ mod tests {
     fn civil_from_days_covers_the_epoch_and_both_directions() {
         assert_eq!(civil_from_days(0), (1970, 1, 1));
         assert_eq!(civil_from_days(-1), (1969, 12, 31));
-        assert_eq!(civil_from_days(19_722), (2023, 11, 14));
-        assert_eq!(civil_from_days(20_088), (2024, 8, 28));
-        // leap days
-        assert_eq!(civil_from_days(19_357), (2023, 2, 28));
-        assert_eq!(civil_from_days(19_358), (2023, 3, 1));
-        assert_eq!(civil_from_days(20_087), (2024, 8, 27));
+        assert_eq!(civil_from_days(19_722), (2023, 12, 31));
+        assert_eq!(civil_from_days(20_088), (2024, 12, 31));
+        // year boundaries
+        assert_eq!(civil_from_days(19_357), (2022, 12, 31));
+        assert_eq!(civil_from_days(19_358), (2023, 1, 1));
+        assert_eq!(civil_from_days(20_087), (2024, 12, 30));
     }
 
     #[test]
@@ -101,14 +101,14 @@ mod tests {
     #[test]
     fn russian_plural_forms_follow_the_last_digits() {
         let forms = |n| plural(n, "эпизод", "эпизода", "эпизодов");
-        for n in [1i64, 21, 31, 41, 101, 1111] {
+        for n in [1i64, 21, 31, 41, 101, 1021] {
             assert_eq!(forms(n), "эпизод", "{n}");
         }
         for n in [2i64, 3, 4, 22, 34, 104] {
             assert_eq!(forms(n), "эпизода", "{n}");
         }
         // 11 – 14 are the exceptions, and so are zero and the tens
-        for n in [0i64, 5, 6, 11, 12, 13, 14, 20, 25, 111, 112, 115] {
+        for n in [0i64, 5, 6, 11, 12, 13, 14, 20, 25, 111, 112, 115, 1111] {
             assert_eq!(forms(n), "эпизодов", "{n}");
         }
         // negative counts never reach the UI, but must not panic either

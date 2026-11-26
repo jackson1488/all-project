@@ -306,8 +306,7 @@ pub fn scroll_body<'a>(content: Column<'a, Message>) -> Element<'a, Message> {
         content
             .spacing(14)
             .padding([16, 20])
-            .width(Length::Fill)
-            .height(Length::Fill),
+            .width(Length::Fill),
     )
     .width(Length::Fill)
     .height(Length::Fill)

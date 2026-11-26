@@ -1,4 +1,4 @@
-use iced::{button, scrollable, Button, Column, Element, Length, Row, Scrollable, Text};
+use iced::{button, scrollable, Button, Column, Element, Length, Radio, Scrollable, Text};
 
 use anixart_core::FeedItem;
 
@@ -15,7 +15,6 @@ pub struct FeedScreen {
     pub error: Option<String>,
     scroll: scrollable::State,
     next_btn: button::State,
-    item_states: Vec<button::State>,
 }
 
 impl FeedScreen {
@@ -27,15 +26,10 @@ impl FeedScreen {
             error: None,
             scroll: scrollable::State::new(),
             next_btn: button::State::new(),
-            item_states: Vec::new(),
         }
     }
 
     pub fn view(&mut self) -> Element<'_, Message> {
-        while self.item_states.len() < self.items.len() {
-            self.item_states.push(button::State::new());
-        }
-
         let mut col = Column::new()
             .push(Text::new(format!("Feed — page {}", self.page)).size(20));
 
@@ -47,22 +41,18 @@ impl FeedScreen {
             col = col.push(Text::new("Loading…"));
         }
 
-        for (i, item) in self.items.iter().enumerate() {
+        for item in &self.items {
             let title = item.title.as_deref().unwrap_or("(no title)");
             let label = format!(
                 "[{}] {} (votes: {})",
                 item.creation_date, title, item.vote_count
             );
-            col = col.push(
-                Button::new(&mut self.item_states[i], Text::new(label).size(14)),
-            );
+            col = col.push(Text::new(label).size(14));
         }
 
         col = col.push(
-            Row::new().push(
-                Button::new(&mut self.next_btn, Text::new("Next page"))
-                    .on_press(Message::FeedPage(self.page + 1)),
-            ),
+            Button::new(&mut self.next_btn, Text::new("Next page"))
+                .on_press(Message::FeedPage(self.page + 1)),
         );
 
         Scrollable::new(&mut self.scroll)

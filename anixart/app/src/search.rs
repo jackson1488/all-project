@@ -7,7 +7,8 @@ pub enum Message {
     QueryChanged(String),
     Search,
     SetPage(usize),
-    SelectResult(Release),
+    SelectResultIdx(String),
+    OpenResult,
 }
 
 pub struct SearchScreen {
@@ -19,7 +20,9 @@ pub struct SearchScreen {
     query_state: text_input::State,
     search_btn: button::State,
     scroll: scrollable::State,
-    result_states: Vec<button::State>,
+    selected_idx_input: text_input::State,
+    pub selected_idx_str: String,
+    open_btn: button::State,
     next_btn: button::State,
 }
 
@@ -34,16 +37,14 @@ impl SearchScreen {
             query_state: text_input::State::new(),
             search_btn: button::State::new(),
             scroll: scrollable::State::new(),
-            result_states: Vec::new(),
+            selected_idx_input: text_input::State::new(),
+            selected_idx_str: String::new(),
+            open_btn: button::State::new(),
             next_btn: button::State::new(),
         }
     }
 
     pub fn view(&mut self) -> Element<'_, Message> {
-        while self.result_states.len() < self.results.len() {
-            self.result_states.push(button::State::new());
-        }
-
         let input = TextInput::new(
             &mut self.query_state,
             "Search releases…",
@@ -66,17 +67,29 @@ impl SearchScreen {
             col = col.push(Text::new("Searching…"));
         }
 
+        // Show results as numbered text
         for (i, rel) in self.results.iter().enumerate() {
             let title = rel.title_ru.as_deref().unwrap_or("(no title)");
             let year = rel.year.as_deref().unwrap_or("?");
-            let label = format!("{title} ({year}) — {:.1}", rel.grade);
-            col = col.push(
-                Button::new(&mut self.result_states[i], Text::new(label).size(14))
-                    .on_press(Message::SelectResult(rel.clone())),
-            );
+            let label = format!("[{i}] {title} ({year}) — {:.1}", rel.grade);
+            col = col.push(Text::new(label).size(14));
         }
 
         if !self.results.is_empty() {
+            let idx_input = TextInput::new(
+                &mut self.selected_idx_input,
+                "Enter # to open",
+                &self.selected_idx_str,
+                Message::SelectResultIdx,
+            ).size(14).width(Length::Units(120));
+            col = col.push(
+                Row::new()
+                    .push(idx_input)
+                    .push(
+                        Button::new(&mut self.open_btn, Text::new("Open"))
+                            .on_press(Message::OpenResult),
+                    ),
+            );
             col = col.push(
                 Button::new(&mut self.next_btn, Text::new("Next page"))
                     .on_press(Message::SetPage(self.page + 1)),

@@ -33,13 +33,18 @@ pub enum Message {
     FeedPage(usize),
 
     SearchQuery(String),
+    SearchSelectIdx(String),
     SearchGo,
+    SearchOpenResult,
 
     ReleaseSelected(i64),
     TypeSelected(usize),
     SourceSelected(usize),
     EpisodeSelected(usize),
     Play(EpisodeInfo),
+    OpenType,
+    OpenSource,
+    OpenEpisode,
     BackToRelease,
     BackToTypes,
 
@@ -263,6 +268,20 @@ impl Application for AnixartApp {
                 self.search_screen.loading = false;
                 Command::none()
             }
+            Message::SearchSelectIdx(v) => {
+                self.search_screen.selected_idx_str = v;
+                Command::none()
+            }
+            Message::SearchOpenResult => {
+                let idx: usize = self.search_screen.selected_idx_str.parse().unwrap_or(999);
+                if idx < self.search_screen.results.len() {
+                    let id = self.search_screen.results[idx].id;
+                    Command::perform(async move { id }, Message::ReleaseSelected)
+                } else {
+                    self.search_screen.error = Some(format!("Invalid index: {idx}"));
+                    Command::none()
+                }
+            }
 
             // ── Release detail ─────────────────────────────────────────────
             Message::ReleaseSelected(id) => {
@@ -413,6 +432,45 @@ impl Application for AnixartApp {
             }
 
             Message::Noop => Command::none(),
+            Message::SearchOpenResult => Command::none(), // handled above
+            Message::SearchSelectIdx(_) => Command::none(),
+
+            // Release text input handlers
+            Message::TypeIdxStr(v) => { self.release_screen.type_idx_str = v; Command::none() }
+            Message::SourceIdxStr(v) => { self.release_screen.source_idx_str = v; Command::none() }
+            Message::EpisodeIdxStr(v) => { self.release_screen.episode_idx_str = v; Command::none() }
+
+            // Release Open handlers
+            Message::OpenType => {
+                let idx: usize = self.release_screen.type_idx_str.parse().unwrap_or(999);
+                if idx < self.release_screen.types.len() {
+                    let msg = Message::TypeSelected(idx);
+                    self.update(msg)
+                } else {
+                    self.release_screen.error = Some(format!("Invalid type #: {idx}"));
+                    Command::none()
+                }
+            }
+            Message::OpenSource => {
+                let idx: usize = self.release_screen.source_idx_str.parse().unwrap_or(999);
+                if idx < self.release_screen.sources.len() {
+                    let msg = Message::SourceSelected(idx);
+                    self.update(msg)
+                } else {
+                    self.release_screen.error = Some(format!("Invalid source #: {idx}"));
+                    Command::none()
+                }
+            }
+            Message::OpenEpisode => {
+                let idx: usize = self.release_screen.episode_idx_str.parse().unwrap_or(999);
+                if idx < self.release_screen.episodes.len() {
+                    let msg = Message::EpisodeSelected(idx);
+                    self.update(msg)
+                } else {
+                    self.release_screen.error = Some(format!("Invalid episode #: {idx}"));
+                    Command::none()
+                }
+            }
         }
     }
 
@@ -451,7 +509,8 @@ impl Application for AnixartApp {
                 search::Message::QueryChanged(v) => Message::SearchQuery(v),
                 search::Message::Search => Message::SearchGo,
                 search::Message::SetPage(_) => Message::Noop,
-                search::Message::SelectResult(rel) => Message::ReleaseSelected(rel.id),
+                search::Message::SelectResultIdx(v) => Message::SearchSelectIdx(v),
+                search::Message::OpenResult => Message::SearchOpenResult,
             }),
             Screen::Release => self.release_screen.view().map(|m| match m {
                 release::Message::SelectType(i) => Message::TypeSelected(i),
@@ -460,6 +519,12 @@ impl Application for AnixartApp {
                 release::Message::PlayEpisode(ep) => {
                     Message::Play(EpisodeInfo { url: ep.url })
                 }
+                release::Message::TypeIdx(v) => Message::TypeIdxStr(v),
+                release::Message::SourceIdx(v) => Message::SourceIdxStr(v),
+                release::Message::EpisodeIdx(v) => Message::EpisodeIdxStr(v),
+                release::Message::OpenType => Message::OpenType,
+                release::Message::OpenSource => Message::OpenSource,
+                release::Message::OpenEpisode => Message::OpenEpisode,
                 release::Message::BackToRelease => Message::BackToRelease,
                 release::Message::BackToTypes => Message::BackToTypes,
                 release::Message::BackToSources => Message::BackToTypes,

@@ -203,12 +203,15 @@ mod tests {
 
     #[test]
     fn a_token_in_the_response_becomes_the_session_token() {
-        assert_eq!(token_of(&response(0, "tok-1")).as_deref(), Ok("tok-1"));
+        assert_eq!(token_of(&response(0, "tok-1")).unwrap(), "tok-1");
     }
 
     #[test]
     fn an_empty_token_is_not_a_success() {
-        assert_eq!(token_of(&response(0, "")).as_deref(), Err("No token in sign-in response"));
+        assert_eq!(
+            token_of(&response(0, "")).unwrap_err(),
+            "No token in sign-in response"
+        );
     }
 
     #[test]

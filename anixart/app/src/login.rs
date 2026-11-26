@@ -340,7 +340,7 @@ impl Login {
             .into()
     }
 
-    fn submit(&self, label: &str, message: Message) -> Element<'_, Message> {
+    fn submit(&self, label: &'static str, message: Message) -> Element<'_, Message> {
         if self.loading {
             return button(text("Working…").size(14))
                 .width(Length::Fill)

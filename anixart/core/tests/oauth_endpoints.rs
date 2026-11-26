@@ -266,8 +266,8 @@ async fn telegram_token_exchange_errors_become_oauth_errors() {
     );
 
     let mock = MockServer::spawn("200 OK", r#"{"access_token":"no id token here"}"#);
-    let client = client(&mock);
-    let err = client
+    let client2 = client(&mock);
+    let err = client2
         .exchange_telegram_code_at(&mock.base, "c", "v")
         .await
         .expect_err("must fail");

@@ -21,16 +21,16 @@ All five produce an Anixart `profileToken.token`; the credential differs
 | Tab | Credential | How it is obtained here |
 |---|---|---|
 | Password | `login` + `password` | `POST /auth/signIn` |
-| Telegram | `telegramIdToken` | app generates the PKCE pair, `xdg-open` opens `https://oauth.telegram.org/auth`; paste back the `…/tglogin?code=…` URL (core exchanges the code for an `id_token`) or an `id_token` directly |
+| Telegram | `telegramIdToken` | app generates the PKCE pair, `xdg-open` opens `https://oauth.telegram.org/auth`; paste back what the browser lands on — the whole `…/tglogin?code=…` URL, only its `?code=…` / `code=…` query (core exchanges the code for an `id_token`), or an `id_token` obtained elsewhere |
 | VK | `vkAccessToken` | `xdg-open` opens the VK ID authorize URL; paste back the redirect URL carrying `access_token=…`, or a VK ID access token |
-| Google | `googleIdToken` (**Firebase** ID token) | paste the token, or give a Google OAuth client id to open the browser sign-in first |
+| Google | `googleIdToken` (**Firebase** ID token) | **one click**: “Sign in with Google (Browser)” uses the client id / Firebase key the APK ships, catches the redirect on its own loopback port, exchanges the Google credential in Firebase (`accounts:signInWithIdp`) and posts it to `/auth/google`. Fallback: paste any redirect URL, Google JWT or `ya29…` token — it is exchanged through Firebase too when Anixart rejects it |
 | Token | — | paste an existing Anixart session token: instant login, no request |
 
-There is no local HTTP callback listener on purpose: the registered redirect
-hosts (`app1593901251-login.tg.dev`, `vk54701760://vk.ru/blank.html`) are bound
-to the Android package, so the provider rejects a `http://localhost` redirect.
-Copying the URL the browser lands on is the provider-approved equivalent, and a
-pasted token works everywhere.
+A local HTTP callback listener is used for **Google only**: a Google web client
+id accepts `http://127.0.0.1:<any port>`. The Telegram / VK redirect hosts
+(`app1593901251-login.tg.dev`, `vk54701760://vk.ru/blank.html`) are bound to the
+Android package, so those providers reject a `http://localhost` redirect — there,
+copying the URL the browser lands on is the provider-approved equivalent.
 
 ## Session persistence
 

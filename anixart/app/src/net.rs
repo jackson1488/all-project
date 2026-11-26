@@ -561,7 +561,8 @@ pub mod google_callback {
                     .await
                     .expect("connect junk");
                 let _ = junk.write_all(b"NOT-HTTP\r\n\r\n").await;
-                let _ = junk.read_to_string(&mut String::new()).await;
+                let mut junk_reply = String::new();
+                let _ = junk.read_to_string(&mut junk_reply).await;
                 drop(junk);
 
                 let mut stream = TcpStream::connect(std::net::SocketAddr::from(([127, 0, 0, 1], port)))
@@ -572,7 +573,8 @@ pub mod google_callback {
                     payload.len()
                 );
                 let _ = stream.write_all(post.as_bytes()).await;
-                let _ = stream.read_to_string(&mut String::new()).await;
+                let mut ack = String::new();
+                let _ = stream.read_to_string(&mut ack).await;
             });
 
             assert_eq!(capture(listener).await.expect("capture"), payload);

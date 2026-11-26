@@ -263,6 +263,23 @@ pub fn title_initial(title: &str) -> char {
         .unwrap_or('?')
 }
 
+/// Absolute cover URL of an object: `None` for a blank value and for a relative
+/// path, because the CDN answers those with a 404 and the placeholder is the
+/// honest result.
+pub fn cover_url(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.starts_with("http") {
+        Some(trimmed.to_owned())
+    } else {
+        None
+    }
+}
+
+/// The same for the `Option<String>` image fields of a release or an article.
+pub fn cover_of(field: &Option<String>) -> Option<String> {
+    field.as_deref().and_then(cover_url)
+}
+
 /// A poster box of the given size: the cached pixels when they are ready,
 /// otherwise the tinted placeholder with the initial of the title.
 pub fn poster_element<'a>(
@@ -272,11 +289,15 @@ pub fn poster_element<'a>(
     width: u16,
     height: u16,
 ) -> iced::Element<'a, crate::app::Message> {
-    use iced::widget::{center, container, image, text};
-    use iced::{Background, Length};
+    use iced::widget::{center, container, text, Image};
+    use iced::{Background, Element, Length};
 
-    let content = match handle {
-        Some(handle) => image(handle.clone())
+    // Два разных виджета (картинка и центр буквы) сходятся в одном типе: без
+    // явной подписи `Element` iced 0.13 не может выбрать, в какой именно
+    // `Renderer` их конвертировать. `Image::<Handle>` пишется целиком, потому
+    // что свободный `image()` сам обобщён по `Handle` и вывод снова застревает.
+    let content: Element<'_, crate::app::Message> = match handle {
+        Some(handle) => Image::<Handle>::new(handle.clone())
             .width(Length::Fill)
             .height(Length::Fill)
             .content_fit(iced::ContentFit::Cover)

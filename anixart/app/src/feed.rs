@@ -57,7 +57,7 @@ impl Feed {
             .map(|item| {
                 (
                     posters::article_key(item.id),
-                    item.image.clone().filter(|url| !url.is_empty()),
+                    posters::cover_of(&item.image),
                 )
             })
             .collect()
@@ -77,7 +77,7 @@ impl Feed {
             .spacing(12)
             .push(widgets::section(
                 "Лента по датам".to_owned(),
-                pills.wrap().into(),
+                pills.wrap(),
             ));
 
         if self.loading {
@@ -121,7 +121,7 @@ mod tests {
             code: 1,
             content: items,
             current_page: current,
-            total_count: items.len() as i32,
+            total_count: items.len() as i64,
             total_page_count: total,
         }
     }
@@ -163,7 +163,7 @@ mod tests {
 
     #[test]
     fn changing_the_window_resets_the_page_and_staying_does_not() {
-        let mut feed = Feed {
+        let feed = Feed {
             category: FeedCategory::Week,
             page: 4,
             ..Default::default()

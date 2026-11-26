@@ -56,8 +56,12 @@ impl BookmarkPage {
         }
     }
 
+    /// `len()` of the half the answer actually carries.
     pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        match self {
+            Self::Releases(page) => page.content.is_empty(),
+            Self::Collections(page) => page.content.is_empty(),
+        }
     }
 
     /// `(cache key, image URL)` pairs of everything on the page.
@@ -69,7 +73,7 @@ impl BookmarkPage {
                 .map(|release| {
                     (
                         posters::release_key(release.id),
-                        release.image.clone().filter(|url| !url.is_empty()),
+                        posters::cover_of(&release.image),
                     )
                 })
                 .collect(),
@@ -79,10 +83,7 @@ impl BookmarkPage {
                 .map(|collection| {
                     (
                         posters::collection_key(collection.id),
-                        collection
-                            .image
-                            .clone()
-                            .filter(|url| !url.is_empty() && url.starts_with("http")),
+                        posters::cover_url(&collection.image),
                     )
                 })
                 .collect(),
@@ -171,10 +172,7 @@ impl Bookmarks {
                 .map(|collection| {
                     (
                         posters::collection_key(collection.id),
-                        collection
-                            .image
-                            .clone()
-                            .filter(|url| !url.is_empty() && url.starts_with("http")),
+                        posters::cover_url(&collection.image),
                     )
                 })
                 .collect()
@@ -184,7 +182,7 @@ impl Bookmarks {
                 .map(|release| {
                     (
                         posters::release_key(release.id),
-                        release.image.clone().filter(|url| !url.is_empty()),
+                        posters::cover_of(&release.image),
                     )
                 })
                 .collect()
@@ -200,8 +198,13 @@ impl Bookmarks {
         }
     }
 
+    /// Пустая ли полка, которая сейчас на экране.
     pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        if self.tab.is_collections() {
+            self.collections.is_empty()
+        } else {
+            self.releases.is_empty()
+        }
     }
 
     /// What the empty state says for this tab, phrased as the action that fills it.
@@ -242,7 +245,7 @@ impl Bookmarks {
             .spacing(12)
             .push(widgets::section(
                 "Разделы библиотеки".to_owned(),
-                tabs.wrap().into(),
+                tabs.wrap(),
             ));
 
         if !self.signed_in {

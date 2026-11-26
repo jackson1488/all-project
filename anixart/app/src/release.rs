@@ -54,7 +54,7 @@ impl ReleaseView {
         match self.release.as_ref() {
             Some(release) => vec![(
                 posters::release_key(release.id),
-                release.image.clone().filter(|url| !url.is_empty()),
+                posters::cover_of(&release.image),
             )],
             None => Vec::new(),
         }
@@ -186,8 +186,7 @@ impl ReleaseView {
                 .spacing(16)
                 .align_y(alignment::Vertical::Top)
                 .push(poster)
-                .push(facts)
-                .into(),
+                .push(facts),
         )
     }
 
@@ -410,7 +409,7 @@ fn voiceovers(view: &ReleaseView) -> Element<'_, Message> {
         ));
     }
 
-    widgets::section(caption, rows.into())
+    widgets::section(caption, rows)
 }
 
 /// Источники видео выбранной озвучки.
@@ -451,7 +450,7 @@ fn sources(view: &ReleaseView) -> Element<'_, Message> {
         ));
     }
 
-    widgets::section(caption, rows.into())
+    widgets::section(caption, rows)
 }
 
 /// Серии выбранного источника — ряд пилюль, потому что их бывает несколько сотен.
@@ -486,7 +485,7 @@ fn episodes(view: &ReleaseView) -> Element<'_, Message> {
         body = body.push(widgets::busy(format!("Разбираю ссылку серии №{position}…")));
     }
 
-    widgets::section(caption, body.into())
+    widgets::section(caption, body)
 }
 
 /// Подпись пилюли серии: номер, имя и всё, что о ней известно.
@@ -556,16 +555,18 @@ fn entry<'a>(
                     .spacing(4)
                     .width(Length::Fill)
                     .push(widgets::headline_row(title))
-                    .push_maybe((!meta.is_empty()).then(|| widgets::muted(meta)))
-                    .into(),
+                    .push_maybe(if meta.is_empty() {
+                        None
+                    } else {
+                        Some(widgets::muted(meta))
+                    }),
             )
             .push(
                 button(text(action.to_owned()).size(14).wrapping(text::Wrapping::Word))
                     .padding([8, 16])
                     .style(style)
                     .on_press_maybe(on_press),
-            )
-            .into(),
+            ),
     )
 }
 
@@ -801,13 +802,22 @@ mod tests {
     #[test]
     fn the_page_builds_headlessly_in_every_stage() {
         let cache = PosterCache::new();
-        let _empty = ReleaseView::default().view(&cache);
 
-        let loading = ReleaseView {
-            loading: true,
-            ..Default::default()
-        };
-        let _busy = loading.view(&cache);
+        // `Element` живёт столько же, сколько заимствование экрана, поэтому каждый
+        // случай собран в своём блоке: иначе следующая мутация `view` попала бы
+        // в середину активного заимствования
+        {
+            let stage = ReleaseView::default();
+            let _empty = stage.view(&cache);
+        }
+
+        {
+            let loading = ReleaseView {
+                loading: true,
+                ..Default::default()
+            };
+            let _busy = loading.view(&cache);
+        }
 
         let mut view = ReleaseView {
             release: Some(release(WatchStatus::Plan.code(), true)),
@@ -837,13 +847,19 @@ mod tests {
             }],
             ..Default::default()
         };
-        let _page = view.view(&cache);
+        {
+            let _page = view.view(&cache);
+        }
 
         view.pending = Some(0);
-        let _resolving = view.view(&cache);
+        {
+            let _resolving = view.view(&cache);
+        }
 
         // a guest sees the hint instead of pressable list buttons
         view.signed_in = false;
-        let _guest = view.view(&cache);
+        {
+            let _guest = view.view(&cache);
+        }
     }
 }

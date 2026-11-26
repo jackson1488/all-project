@@ -917,7 +917,8 @@ pub async fn set_favorite(
     } else {
         client.favorite_delete(release_id).await
     };
-    response.map(|_| ()).map_err(|e| e.to_string())
+    response.map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// `GET /profile/list/add/{status}/{r_id}` — moves a release into a watch list.
@@ -930,7 +931,11 @@ pub async fn apply_watch_status(
         return Err("Статус «Не смотрю» удаляет релиз из списка".to_owned());
     };
     let client = api_client(token)?;
-    client.set_watch_status(core, release_id).await.map(|_| ()).map_err(|e| e.to_string())
+    client
+        .set_watch_status(core, release_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// `GET /profile/list/delete/{status}/{r_id}` — takes a release out of a list.
@@ -946,8 +951,8 @@ pub async fn drop_watch_status(
     client
         .remove_watch_status(core, release_id)
         .await
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// `GET /history/add/{r_id}/{s_id}/{position}` — marks an episode as opened, which
@@ -962,8 +967,8 @@ pub async fn history_add(
     client
         .history_add(release_id, source_id, position)
         .await
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// `GET /history/delete/{r_id}` — forgets a release on the «История» tab.
@@ -972,8 +977,8 @@ pub async fn history_delete(token: Option<String>, release_id: i64) -> Result<()
     client
         .history_delete(release_id)
         .await
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// `POST /filter/{page}` — the catalogue shelf of «Обзор».
@@ -1044,12 +1049,17 @@ mod tests {
     use anixart_core::ProfileToken;
 
     fn response(code: i32, token: &str) -> SocialSignInResponse {
-        SocialSignInResponse {
-            code,
-            profile_token: (!token.is_empty()).then(|| ProfileToken {
+        let profile_token = if token.is_empty() {
+            None
+        } else {
+            Some(ProfileToken {
                 id: 1,
                 token: token.to_owned(),
-            }),
+            })
+        };
+        SocialSignInResponse {
+            code,
+            profile_token,
             ..SocialSignInResponse::default()
         }
     }
@@ -1098,7 +1108,7 @@ mod tests {
     #[test]
     fn the_callback_timeout_leaves_room_for_a_browser_login() {
         // Long enough to read a 2FA prompt, short enough not to pin a port forever.
-        assert!(CALLBACK_TIMEOUT.as_secs() >= 60 && CALLBACK_TIMEOUT.as_secs() <= 600);
+        assert!((60..=600).contains(&CALLBACK_TIMEOUT.as_secs()));
     }
 
     #[test]
@@ -1141,7 +1151,7 @@ mod tests {
 
     #[test]
     fn the_clipboard_timeout_is_short_enough_to_feel_instant() {
-        assert!(CLIPBOARD_TIMEOUT.as_secs() >= 2 && CLIPBOARD_TIMEOUT.as_secs() <= 30);
+        assert!((2..=30).contains(&CLIPBOARD_TIMEOUT.as_secs()));
     }
 
     /// No Wayland / X session on the CI runner: the readers must fail fast and name

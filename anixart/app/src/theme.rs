@@ -258,14 +258,14 @@ pub mod styles {
                 border: Border::default(),
                 shadow: Shadow::default(),
             },
-            vertical_rail: rail(),
-            horizontal_rail: rail(),
+            vertical_rail: scroller_rail(),
+            horizontal_rail: scroller_rail(),
             gap: Some(Background::Color(BACKGROUND)),
         }
     }
 
     /// A scrollbar rail with no track of its own and a rounded, dimmed thumb.
-    fn rail() -> scrollable::Rail {
+    fn scroller_rail() -> scrollable::Rail {
         scrollable::Rail {
             background: None,
             border: Border::default(),
@@ -384,15 +384,17 @@ mod tests {
 
     #[test]
     fn the_theme_is_custom_dark_and_stable() {
-        let theme = theme();
-        assert_eq!(theme.to_string(), "Anixart Dark");
-        assert_eq!(theme.palette().background, BACKGROUND);
-        assert_eq!(theme.palette().primary, ACCENT);
-        assert_eq!(theme.palette().danger, ACCENT_DEEP);
-        assert!(theme.extended_palette().is_dark);
+        // привязка называется не `theme`, иначе `theme()` ниже станет вызовом
+        // значения, а не функции
+        let dark = theme();
+        assert_eq!(dark.to_string(), "Anixart Dark");
+        assert_eq!(dark.palette().background, BACKGROUND);
+        assert_eq!(dark.palette().primary, ACCENT);
+        assert_eq!(dark.palette().danger, ACCENT_DEEP);
+        assert!(dark.extended_palette().is_dark);
         // built once: two calls hand back the same arc
-        assert_eq!(theme.clone(), theme());
-        assert_eq!(theme, palette_theme());
+        assert_eq!(dark.clone(), theme());
+        assert_eq!(dark, palette_theme());
     }
 
     fn palette_theme() -> Theme {

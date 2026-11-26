@@ -72,7 +72,7 @@ impl ProfileSnapshot {
     pub fn rating(&self) -> i32 {
         match self.profile.as_ref() {
             Some(profile) => profile.rating_score,
-            None => self.info.rating_score.unwrap_or(0),
+            None => self.info.rating_score,
         }
     }
 
@@ -80,7 +80,7 @@ impl ProfileSnapshot {
     pub fn privilege(&self) -> i64 {
         match self.profile.as_ref() {
             Some(profile) => profile.privilege_level,
-            None => self.info.privilege_level.unwrap_or(0),
+            None => self.info.privilege_level,
         }
     }
 
@@ -88,12 +88,11 @@ impl ProfileSnapshot {
     /// info response wins over everything else, because that one is not mirrored
     /// onto the profile document.
     pub fn is_blocked(&self) -> bool {
-        self.info.is_perm_banned.unwrap_or(false)
+        self.info.is_perm_banned
             || self
                 .profile
                 .as_ref()
-                .map(|profile| profile.is_perm_banned || profile.is_banned)
-                .unwrap_or(false)
+                .is_some_and(|profile| profile.is_perm_banned || profile.is_banned)
     }
 
     /// The five list counters, in [`WatchStatus`] order and skipping the
@@ -196,9 +195,12 @@ impl ProfileView {
         ]);
         lines = lines.push(widgets::muted(meta));
 
+        // Счётчики списков и «не списки» (избранное, коллекции…) печатаются одной
+        // строкой пилюль, поэтому обе половины сводятся к `(String, i32)`.
         let counters = snapshot
             .lists()
             .into_iter()
+            .map(|(status, count)| (status.label().to_owned(), count))
             .chain(
                 snapshot
                     .extras()
@@ -263,11 +265,11 @@ mod tests {
         ProfileInfoResponse {
             code: 1,
             channel_id: Some(77),
-            privilege_level: Some(2),
-            rating_score: Some(120),
-            sponsorship_expires: None,
-            is_sponsor: Some(false),
-            is_perm_banned: Some(false),
+            privilege_level: 2,
+            rating_score: 120,
+            sponsorship_expires: 0,
+            is_sponsor: false,
+            is_perm_banned: false,
         }
     }
 
@@ -392,21 +394,23 @@ mod tests {
 
     #[test]
     fn a_permanent_ban_from_either_response_blocks_the_screen() {
-        let info = ProfileInfoResponse {
-            is_perm_banned: Some(true),
+        // локальные привязки называются иначе, чем фабрики `info()` / `profile()`:
+        // иначе последующие вызовы упираются в уже не функцию, а значение
+        let banned = ProfileInfoResponse {
+            is_perm_banned: true,
             ..info()
         };
-        assert!(ProfileSnapshot::new(info.clone(), None).is_blocked());
+        assert!(ProfileSnapshot::new(banned.clone(), None).is_blocked());
 
-        let mut profile = profile();
-        assert!(!ProfileSnapshot::new(info(), Some(profile.clone())).is_blocked());
-        profile.is_banned = true;
-        assert!(ProfileSnapshot::new(info(), Some(profile.clone())).is_blocked());
-        profile.is_banned = false;
-        profile.is_perm_banned = true;
-        assert!(ProfileSnapshot::new(info(), Some(profile)).is_blocked());
+        let mut doc = profile();
+        assert!(!ProfileSnapshot::new(info(), Some(doc.clone())).is_blocked());
+        doc.is_banned = true;
+        assert!(ProfileSnapshot::new(info(), Some(doc.clone())).is_blocked());
+        doc.is_banned = false;
+        doc.is_perm_banned = true;
+        assert!(ProfileSnapshot::new(info(), Some(doc)).is_blocked());
         // the info half alone is enough, even with a clean profile document
-        assert!(ProfileSnapshot::new(info, Some(profile())).is_blocked());
+        assert!(ProfileSnapshot::new(banned, Some(profile())).is_blocked());
     }
 
     #[test]

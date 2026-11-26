@@ -82,9 +82,8 @@ impl SessionStore {
 
     /// Writes the session (creating the directory when missing).
     pub fn save(&self, token: &str, method: &str) -> Result<(), String> {
-        let path = match self.path() {
-            Some(path) => path,
-            None => return Ok(()),
+        let Some(path) = self.path() else {
+            return Ok(());
         };
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;

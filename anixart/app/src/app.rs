@@ -1152,11 +1152,10 @@ impl App {
 
         match self.store.save(&token, method.as_str()) {
             Ok(()) => {
-                let location = self
-                    .store
-                    .path()
-                    .map(|path| path.display().to_string())
-                    .unwrap_or_else(|| "файл конфигурации".to_owned());
+                let location = match self.store.path() {
+                    Some(path) => path.display().to_string(),
+                    None => "файл конфигурации".to_owned(),
+                };
                 self.status = Some(format!(
                     "Вход через {} выполнен — сессия сохранена в {location}",
                     method.label()
@@ -1278,17 +1277,14 @@ impl App {
 
         let mut artwork = vec![(
             posters::collection_key(collection.id),
-            collection
-                .image
-                .clone()
-                .filter(|url| !url.is_empty() && url.starts_with("http")),
+            posters::cover_url(&collection.image),
         )];
-        artwork.extend(collection.releases.iter().map(|release| {
-            (
-                posters::release_key(release.id),
-                release.image.clone().filter(|url| !url.is_empty()),
-            )
-        }));
+        artwork.extend(
+            collection
+                .releases
+                .iter()
+                .map(|release| (posters::release_key(release.id), posters::cover_of(&release.image))),
+        );
         artwork
     }
 
@@ -1333,7 +1329,12 @@ impl App {
             any = true;
         }
 
-        any.then(|| column.padding([12, 20]).width(Length::Fill).into())
+        // без сообщений зона статуса не создаётся вовсе
+        if any {
+            Some(column.padding([12, 20]).width(Length::Fill).into())
+        } else {
+            None
+        }
     }
 
     /// Активный экран.
@@ -1386,12 +1387,12 @@ impl App {
         let author = collection
             .creator
             .as_ref()
-            .map(|creator| creator.login.trim().to_owned())
+            .map(|creator| creator.login.trim())
             .filter(|login| !login.is_empty())
-            .unwrap_or_else(|| "Anixart".to_owned());
+            .unwrap_or("Anixart");
 
         let mut chips = vec![
-            author,
+            author.to_owned(),
             util::count_label(
                 collection.releases.len() as i64,
                 "релиз",
@@ -1449,8 +1450,7 @@ impl App {
                     .spacing(16)
                     .align_y(alignment::Vertical::Top)
                     .push(cover)
-                    .push(facts)
-                    .into(),
+                    .push(facts),
             ))
             .push(widgets::section(caption, shelf))
             .push(
@@ -1491,7 +1491,7 @@ impl App {
             };
 
             rail = rail.push(
-                button(widgets::button_label(screen.label().to_owned(), 15))
+                button(widgets::button_label(screen.label(), 15))
                     .width(Length::Fill)
                     .padding([12, 14])
                     .style(style)
@@ -1501,14 +1501,14 @@ impl App {
 
         rail = rail.push(vertical_space());
         rail = rail.push(
-            button(widgets::button_label("Назад".to_owned(), 14))
+            button(widgets::button_label("Назад", 14))
                 .width(Length::Fill)
                 .padding([10, 14])
                 .style(theme::styles::ghost)
                 .on_press_maybe((!self.stack.is_empty()).then_some(Message::Back)),
         );
         rail = rail.push(
-            button(widgets::button_label("Выйти".to_owned(), 14))
+            button(widgets::button_label("Выйти", 14))
                 .width(Length::Fill)
                 .padding([10, 14])
                 .style(theme::styles::danger)

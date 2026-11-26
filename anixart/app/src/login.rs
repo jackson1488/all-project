@@ -362,7 +362,7 @@ impl Login {
                  Каталог и лента читаются и без входа."
                     .to_owned(),
             ))
-            .push(widgets::section("Войти с помощью".to_owned(), pills.wrap().into()))
+            .push(widgets::section("Войти с помощью".to_owned(), pills.wrap()))
             .push(form)
             .push(widgets::divider())
             .push(
@@ -380,8 +380,11 @@ impl Login {
                     )),
             );
 
-        container(scrollable(body).height(Length::Fill).max_width(620))
+        // `Scrollable` 0.13 не знает `max_width`: ширину формы задаёт
+        // обёртка, а прокрутка остаётся по высоте.
+        container(scrollable(body).height(Length::Fill))
             .width(Length::Fill)
+            .max_width(620)
             .center_x(Length::Fill)
             .padding(20)
             .into()
@@ -472,9 +475,9 @@ impl Login {
                 widgets::Tone::Warn,
             ))
             .push(widgets::muted(
-                "Yandex ID отдаёт токен иммитуым потоком (`response_type=token`), а \
-                 его redirect URI привязан к Android-пакету \
-                 (`yxa980f005…\.oauth.yandex.ru/auth/finish`), поэтому браузер \
+                "Yandex ID отдаёт токен имплицитным потоком (`response_type=token`), \
+                 а его redirect URI привязан к Android-пакету вида \
+                 `yxa980f005….oauth.yandex.ru/auth/finish`, поэтому браузер \
                  приземляется туда без полезной страницы. Скопируйте весь URL — в \
                  нём будет `access_token=…` — или вставьте сам токен напрямую; оба \
                  варианта уходят в auth/yandex."
@@ -585,7 +588,7 @@ impl Login {
 
     /// Широкая кнопка на всю ширину формы.
     fn wide(&self, caption: &str, message: Message) -> Element<'_, Message> {
-        button(widgets::button_label(caption.to_owned(), 15))
+        button(widgets::button_label(caption, 15))
             .width(Length::Fill)
             .padding([12, 18])
             .style(theme::styles::ghost)
@@ -595,7 +598,7 @@ impl Login {
 
     /// Широкая акцентная кнопка — главный клик вкладки.
     fn wide_accent(&self, caption: &str, message: Option<Message>) -> Element<'_, Message> {
-        button(widgets::button_label(caption.to_owned(), 15))
+        button(widgets::button_label(caption, 15))
             .width(Length::Fill)
             .padding([12, 18])
             .style(theme::styles::accent)
@@ -606,9 +609,9 @@ impl Login {
     /// Главная кнопка вкладки: во время входа она становится неактивной подписью.
     fn submit(&self, caption: &str, message: Message) -> Element<'_, Message> {
         if self.loading {
-            return widgets::busy("Вход выполняется…");
+            return widgets::busy("Вход выполняется…".to_owned());
         }
-        button(widgets::button_label(caption.to_owned(), 15))
+        button(widgets::button_label(caption, 15))
             .width(Length::Fill)
             .padding([12, 18])
             .style(theme::styles::accent)
@@ -620,7 +623,7 @@ impl Login {
     /// поэтому клавиатурная вставка больше не нужна. Во время входа бездействует,
     /// как и [`Login::submit`].
     fn paste_button(&self, target: PasteTarget) -> Element<'_, Message> {
-        button(widgets::button_label(PASTE_BUTTON.to_owned(), 14))
+        button(widgets::button_label(PASTE_BUTTON, 14))
             .width(Length::Fill)
             .padding([10, 18])
             .style(theme::styles::pill)

@@ -542,7 +542,7 @@ mod tests {
         // status 0 is not a list, so it has no `anixart_core` counterpart
         assert_eq!(WatchStatus::None.to_core(), None);
         for status in WatchStatus::ALL.iter().skip(1) {
-            let core = status.to_core().unwrap_or_else(|| panic!("{status}: no core twin"));
+            let core = status.to_core().expect("{status}: no core twin");
             assert_eq!(core.as_i32(), status.code(), "{status} ↔ {core:?}");
             assert_eq!(WatchStatus::from_core(core), *status);
         }

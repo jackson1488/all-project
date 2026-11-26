@@ -114,20 +114,25 @@ pub fn chunk(total: usize, columns: usize) -> Vec<(usize, usize)> {
         .collect()
 }
 
+/// Заголовок, который реально что-то говорит: `None` для пустого или состоящего
+/// из пробелов значения, иначе — обрезанная ссылка.
+fn non_blank(text: Option<&str>) -> Option<&str> {
+    text.map(str::trim).filter(|value| !value.is_empty())
+}
+
+/// То же для опционального поля модели.
+fn caption(field: &Option<String>) -> Option<&str> {
+    non_blank(field.as_deref())
+}
+
 /// Display title of a release: the Russian one when the catalogue has it, then
 /// the original, then the alternative, and a neutral caption when none came back.
 pub fn release_title(release: &Release) -> String {
-    let pick = |field: &Option<String>| {
-        field
-            .as_deref()
-            .map(str::trim)
-            .filter(|title| !title.is_empty())
-            .map(str::to_owned)
-    };
-    pick(&release.title_ru)
-        .or_else(|| pick(&release.title_original))
-        .or_else(|| pick(&release.title_alt))
-        .unwrap_or_else(|| "Без названия".to_owned())
+    caption(&release.title_ru)
+        .or_else(|| caption(&release.title_original))
+        .or_else(|| caption(&release.title_alt))
+        .unwrap_or("Без названия")
+        .to_owned()
 }
 
 /// Display name of a voiceover / translation, falling back to what the kind of
@@ -146,7 +151,9 @@ pub fn voiceover_title(kind: &EpisodeType) -> String {
 }
 
 /// A word-wrapped text of the given size and colour, shrunk to its content.
-fn label<'a>(caption: String, size: f32, color: iced::Color) -> Text<'a> {
+/// The size is a `u16`: font sizes here are whole points, and `Pixels` is built
+/// from a `u16` — an unsuffixed literal would otherwise have to name `15.0`.
+fn label<'a>(caption: String, size: u16, color: iced::Color) -> Text<'a> {
     text(caption)
         .size(size)
         .color(color)
@@ -155,15 +162,17 @@ fn label<'a>(caption: String, size: f32, color: iced::Color) -> Text<'a> {
 
 /// A text that stretches across its container, so a long caption wraps instead
 /// of pushing the card wider.
-fn line<'a>(caption: String, size: f32, color: iced::Color) -> Text<'a> {
+fn line<'a>(caption: String, size: u16, color: iced::Color) -> Text<'a> {
     label(caption, size, color).width(Length::Fill)
 }
 
 /// The label of a button: same shape as [`line`], but the colour is left to the
 /// button style, which is what makes the active pill readable on the accent fill.
 /// Public because a screen that builds its own wide buttons needs the same rule.
-pub fn button_label<'a>(caption: String, size: f32) -> Text<'a> {
-    text(caption).size(size).wrapping(text::Wrapping::Word)
+pub fn button_label<'a>(caption: impl Into<String>, size: u16) -> Text<'a> {
+    text(caption.into())
+        .size(size)
+        .wrapping(text::Wrapping::Word)
 }
 
 /// A large section heading.
@@ -246,7 +255,7 @@ pub fn pill<'a>(caption: String, active: bool, message: Message) -> Element<'a, 
 /// (`None`) simply cannot be pressed, which is how a loading screen disables
 /// itself without changing its shape.
 pub fn action<'a>(caption: &str, on_press: Option<Message>) -> Element<'a, Message> {
-    button(button_label(caption.to_owned(), 14))
+    button(button_label(caption, 14))
         .padding([10, 18])
         .style(theme::styles::accent)
         .on_press_maybe(on_press)
@@ -267,8 +276,11 @@ pub fn headline_row<'a>(caption: String) -> Element<'a, Message> {
         .into()
 }
 
-/// A raised card that holds arbitrary content.
-pub fn card<'a>(content: Element<'a, Message>) -> Element<'a, Message> {
+/// A raised card that holds arbitrary content. The content is taken as
+/// `impl Into<Element>` so a caller can hand a bare [`Column`] or [`Row`] — a
+/// `.into()` written at the call site would leave iced guessing which
+/// [`Element`](iced::Element) it converts to.
+pub fn card<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
     container(content)
         .padding(16)
         .width(Length::Fill)
@@ -277,7 +289,10 @@ pub fn card<'a>(content: Element<'a, Message>) -> Element<'a, Message> {
 }
 
 /// A heading plus the content it introduces.
-pub fn section<'a>(caption: String, content: Element<'a, Message>) -> Element<'a, Message> {
+pub fn section<'a>(
+    caption: String,
+    content: impl Into<Element<'a, Message>>,
+) -> Element<'a, Message> {
     Column::new()
         .spacing(10)
         .push(subhead(caption))
@@ -306,8 +321,7 @@ pub fn empty_state<'a>(caption: String, note: String) -> Element<'a, Message> {
         Column::new()
             .spacing(8)
             .push(subhead(caption))
-            .push(muted(note))
-            .into(),
+            .push(muted(note)),
     )
 }
 
@@ -476,12 +490,11 @@ pub fn article_card<'a>(cache: &PosterCache, item: &FeedItem) -> Element<'a, Mes
     let channel = item
         .channel
         .as_ref()
-        .and_then(|channel| channel.title.clone().or_else(|| channel.name.clone()))
-        .map(|name| name.trim().to_owned())
-        .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| "Anixart".to_owned());
+        .and_then(|channel| channel.title.as_deref().or(channel.name.as_deref()))
+        .and_then(non_blank)
+        .unwrap_or("Anixart");
 
-    let mut parts = vec![channel, util::date_label(item.creation_date)];
+    let mut parts = vec![channel.to_owned(), util::date_label(item.creation_date)];
     if item.is_pinned {
         parts.push("Закреплено".to_owned());
     }
@@ -511,10 +524,12 @@ pub fn article_card<'a>(cache: &PosterCache, item: &FeedItem) -> Element<'a, Mes
                         line(title, 16, theme::TEXT).wrapping(text::Wrapping::WordOrGlyph),
                     )
                     .push(muted(join_meta(parts)))
-                    .push_maybe((!counters.is_empty()).then(|| muted(counters)))
-                    .into(),
-            )
-            .into(),
+                    .push_maybe(if counters.is_empty() {
+                        None
+                    } else {
+                        Some(muted(counters))
+                    }),
+            ),
     )
 }
 
@@ -555,19 +570,19 @@ pub fn poster_grid<'a>(
     columns: usize,
 ) -> Element<'a, Message> {
     let columns = columns.max(1);
-    let mut rows = Column::new().spacing(GRID_GAP as u16);
+    let mut rows = Column::new().spacing(GRID_GAP);
 
     for (start, end) in chunk(releases.len(), columns) {
-        let mut row = Row::new().spacing(GRID_GAP as u16);
+        let mut row = Row::new().spacing(GRID_GAP);
         for release in &releases[start..end] {
             row = row.push(release_tile(cache, release));
         }
         // the spacers only hold the column widths, they never draw anything
         for _ in end..start + columns {
             row = row.push(
-                container(text("").size(1))
+                container(text(""))
                     .width(Length::Fixed(f32::from(TILE_WIDTH)))
-                    .into(),
+                    .height(Length::Shrink),
             );
         }
         rows = rows.push(row);
@@ -595,13 +610,13 @@ pub fn collection_card<'a>(cache: &PosterCache, collection: &Collection) -> Elem
     let author = collection
         .creator
         .as_ref()
-        .map(|creator| creator.login.trim().to_owned())
+        .map(|creator| creator.login.trim())
         .filter(|login| !login.is_empty())
-        .unwrap_or_else(|| "Anixart".to_owned());
+        .unwrap_or("Anixart");
 
     let description = collection.description.trim();
     let meta = join_meta(vec![
-        author,
+        author.to_owned(),
         util::date_label(collection.creation_date),
         util::count_label(
             collection.releases.len() as i64,
@@ -798,7 +813,7 @@ mod tests {
         assert_eq!(grid_columns(f32::from(TILE_WIDTH), GRID_GAP), 1);
         // the default is a sane middle of that range, so a screen without a width
         // measurement still lays out like the window it ships in
-        assert!(GRID_COLUMNS >= 2 && GRID_COLUMNS <= grid_columns(1024.0, GRID_GAP));
+        assert!((2..=grid_columns(1024.0, GRID_GAP)).contains(&GRID_COLUMNS));
         assert_eq!(GRID_GAP, 12.0);
     }
 

@@ -41,8 +41,9 @@ impl BrowsePage {
         self.releases().len()
     }
 
+    /// Пустой ли ответ: та же половина, что считает [`BrowsePage::len`].
     pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        self.releases().is_empty()
     }
 
     /// Page number the backend echoed, `None` for the answers that carry none —
@@ -137,7 +138,7 @@ impl Browse {
             .map(|release| {
                 (
                     posters::release_key(release.id),
-                    release.image.clone().filter(|url| !url.is_empty()),
+                    posters::cover_of(&release.image),
                 )
             })
             .collect()
@@ -192,7 +193,7 @@ impl Browse {
 
         let mut body = Column::new()
             .spacing(12)
-            .push(widgets::section("Полки обзора".to_owned(), pills.wrap().into()));
+            .push(widgets::section("Полки обзора".to_owned(), pills.wrap()));
 
         if self.tab.needs_query() {
             let input = text_input("Название, оригинал или альтернатива…", &self.query)
@@ -213,8 +214,7 @@ impl Browse {
                 Row::new()
                     .spacing(10)
                     .push(input)
-                    .push(action)
-                    .into(),
+                    .push(action),
             ));
         }
 
@@ -228,7 +228,7 @@ impl Browse {
             });
             body = body.push(widgets::section(
                 "Сортировка".to_owned(),
-                sorts.wrap().into(),
+                sorts.wrap(),
             ));
         }
 
@@ -321,6 +321,8 @@ mod tests {
         response.related.as_mut().unwrap().name = Some("  ".to_owned());
         assert_eq!(BrowsePage::Search(response).related(), None);
 
+        // `related` отсутствует целиком — ответ без него тоже не даёт подписи
+        let mut response = search(&[1]);
         response.related = None;
         assert_eq!(BrowsePage::Search(response).related(), None);
     }

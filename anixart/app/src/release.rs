@@ -1,5 +1,3 @@
-//! Release detail page showing voiceovers / types, sources, episodes and playback.
-
 use iced::{button, scrollable, Button, Column, Container, Element, Length, Row, Scrollable, Text};
 
 use anixart_core::{Episode, EpisodeType, Release, Source};
@@ -69,56 +67,51 @@ impl ReleaseScreen {
                 col = col.push(Text::new(err).color([1.0, 0.0, 0.0]));
             }
 
-            // Voiceover / Type list
+            // Types / Voiceovers
             if !self.types.is_empty() {
-                col = col.push(Text::new("— Voiceovers / Types —").size(16));
+                col = col.push(Text::new("— Voiceovers —").size(16));
                 for (i, t) in self.types.iter().enumerate() {
                     let marker = if self.selected_type_idx == Some(i) { " >" } else { "" };
                     let label = format!("{}{} ({} ep, sub: {})", t.name, marker, t.episodes_count, t.is_sub);
-                    col = col.push(
-                        Button::new(
-                            &mut button::State::new(),
-                            Text::new(label).size(13),
-                        )
-                        .on_press(Message::SelectType(i)),
-                    );
+                    let btn = Button::new(&mut button::State::new(), Text::new(label).size(13))
+                        .on_press(Message::SelectType(i));
+                    col = col.push(btn);
                 }
+            } else if self.loading_types {
+                col = col.push(Text::new("Loading voiceovers…"));
             }
 
-            // Source list for selected type
+            // Sources
             if self.selected_type_idx.is_some() && !self.sources.is_empty() {
                 col = col.push(Text::new("—— Sources ——").size(16));
                 for (i, s) in self.sources.iter().enumerate() {
                     let marker = if self.selected_source_idx == Some(i) { " >" } else { "" };
                     let label = format!("{}{} ({} ep)", s.name, marker, s.episodes_count);
-                    col = col.push(
-                        Button::new(
-                            &mut button::State::new(),
-                            Text::new(label).size(13),
-                        )
-                        .on_press(Message::SelectSource(i)),
-                    );
+                    let btn = Button::new(&mut button::State::new(), Text::new(label).size(13))
+                        .on_press(Message::SelectSource(i));
+                    col = col.push(btn);
                 }
+            } else if self.selected_type_idx.is_some() && self.loading_sources {
+                col = col.push(Text::new("Loading sources…"));
             }
 
-            // Episode list
+            // Episodes
             if self.selected_source_idx.is_some() && !self.episodes.is_empty() {
                 col = col.push(Text::new("——— Episodes ———").size(16));
                 for ep in &self.episodes {
                     let ep_name = ep.name.as_deref().unwrap_or(&format!("Ep #{}", ep.position));
                     let watched = if ep.is_watched { " ✓" } else { "" };
                     let label = format!("{ep_name}{watched}");
-                    col = col.push(
-                        Button::new(
-                            &mut button::State::new(),
-                            Text::new(label).size(13),
-                        )
-                        .on_press(Message::PlayEpisode(ep.clone())),
-                    );
+                    let btn = Button::new(&mut button::State::new(), Text::new(label).size(13))
+                        .on_press(Message::PlayEpisode(ep.clone()));
+                    col = col.push(btn);
                 }
+            } else if self.selected_source_idx.is_some() && self.loading_episodes {
+                col = col.push(Text::new("Loading episodes…"));
             }
 
             // Back navigation
+            let back_row = iced::Row::new().spacing(10);
             if self.selected_source_idx.is_some() {
                 col = col.push(
                     Button::new(&mut button::State::new(), Text::new("← Back to sources"))
@@ -127,14 +120,15 @@ impl ReleaseScreen {
             } else if self.selected_type_idx.is_some() {
                 col = col.push(
                     Button::new(&mut button::State::new(), Text::new("← Back to types"))
-                        .on_press(Message::BackToTypes),
+                        .on_press(Message::BackToRelease),
                 );
             }
         } else {
             col = col.push(Text::new("No release loaded"));
         }
 
-        Container::new(Scrollable::new(&mut self.scroll).push(col))
+        Scrollable::new(&mut self.scroll)
+            .push(col)
             .width(Length::Fill)
             .height(Length::Fill)
             .into()

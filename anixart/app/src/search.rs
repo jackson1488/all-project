@@ -1,5 +1,3 @@
-//! Search screen.
-
 use iced::{button, scrollable, text_input, Button, Column, Container, Element, Length, Row, Scrollable, Text, TextInput};
 
 use anixart_core::Release;
@@ -63,23 +61,19 @@ impl SearchScreen {
             let title = rel.title_ru.as_deref().unwrap_or("(no title)");
             let year = rel.year.as_deref().unwrap_or("?");
             let label = format!("{title} ({year}) — {:.1}", rel.grade);
-            col = col.push(
-                Button::new(
-                    &mut button::State::new(),
-                    Text::new(label).size(14),
-                )
-                .on_press(Message::SelectResult(rel.clone())),
-            );
+            let btn = Button::new(&mut button::State::new(), Text::new(label).size(14))
+                .on_press(Message::SelectResult(rel.clone()));
+            col = col.push(btn);
         }
 
         if !self.results.is_empty() {
-            col = col.push(
-                Button::new(&mut button::State::new(), Text::new("Next page"))
-                    .on_press(Message::SetPage(self.page + 1)),
-            );
+            let next_btn = Button::new(&mut button::State::new(), Text::new("Next page"))
+                .on_press(Message::SetPage(self.page + 1));
+            col = col.push(next_btn);
         }
 
-        Container::new(Scrollable::new(&mut self.scroll).push(col))
+        Scrollable::new(&mut self.scroll)
+            .push(col)
             .width(Length::Fill)
             .height(Length::Fill)
             .into()

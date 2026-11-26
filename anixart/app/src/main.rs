@@ -1,7 +1,7 @@
 //! Anixart Linux client: iced UI with login, feed, search,
 //! release page, episode/voiceover/source list, and mpv playback.
 
-use iced::{executor, Application, Command, Element, Settings};
+use iced::{button, executor, Application, Button, Column, Command, Element, Row, Settings, Text};
 use std::process::Command as ProcessCommand;
 
 mod feed;
@@ -23,23 +23,18 @@ enum Screen {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    // Login
     LoginUsername(String),
     LoginPassword(String),
     LoginGo,
 
-    // Navigation
     Nav(Screen),
     Logout,
 
-    // Feed
     FeedPage(usize),
 
-    // Search
     SearchQuery(String),
     SearchGo,
 
-    // Release detail
     ReleaseSelected(i64),
     TypeSelected(usize),
     SourceSelected(usize),
@@ -48,7 +43,6 @@ pub enum Message {
     BackToRelease,
     BackToTypes,
 
-    // Async results
     LoginOk(String),
     LoginFail(String),
     FeedOk(Vec<FeedItem>),
@@ -69,16 +63,14 @@ pub enum Message {
     Noop,
 }
 
-// ── Shared types ────────────────────────────────────────────────────────────
-
 use anixart_core::{
     AnixartClient, Episode, EpisodeType, FeedItem, Release, ReleaseSearchResponse, Source,
 };
 use anixart_parsers::ParsedVideo;
 
 #[derive(Debug, Clone)]
-struct EpisodeInfo {
-    url: String,
+pub struct EpisodeInfo {
+    pub url: String,
 }
 
 // ── Async helpers ───────────────────────────────────────────────────────────
@@ -98,7 +90,9 @@ async fn search_for(client: AnixartClient, query: String, page: usize) -> Result
 }
 
 async fn release_detail(client: AnixartClient, id: i64) -> Result<Release, String> {
-    client.release(id, true).await.and_then(|r| r.release.ok_or_else(|| "Not found".to_string())).map_err(|e| e.to_string())
+    client.release(id, true).await
+        .and_then(|r| r.release.ok_or_else(|| "Not found".to_string()))
+        .map_err(|e| e.to_string())
 }
 
 async fn fetch_types(client: AnixartClient, id: i64) -> Result<Vec<EpisodeType>, String> {
@@ -125,11 +119,15 @@ struct AnixartApp {
     screen: Screen,
     screen_stack: Vec<Screen>,
 
-    // Sub-forms
     login_form: login::LoginForm,
     feed_screen: feed::FeedScreen,
     search_screen: search::SearchScreen,
     release_screen: release::ReleaseScreen,
+
+    // Persistent button states for nav bar
+    nav_feed: button::State,
+    nav_search: button::State,
+    nav_logout: button::State,
 }
 
 impl Application for AnixartApp {
@@ -151,6 +149,9 @@ impl Application for AnixartApp {
                 feed_screen: feed::FeedScreen::new(),
                 search_screen: search::SearchScreen::new(),
                 release_screen: release::ReleaseScreen::new(),
+                nav_feed: button::State::new(),
+                nav_search: button::State::new(),
+                nav_logout: button::State::new(),
             },
             Command::none(),
         )
@@ -174,8 +175,6 @@ impl Application for AnixartApp {
             Message::LoginGo => {
                 let u = self.login_form.username.clone();
                 let p = self.login_form.password.clone();
-                // We need to clone the client to pass it, but login modifies it.
-                // Use a fresh client for login, then return the token.
                 self.login_form.loading = true;
                 Command::perform(login_go(u, p), |r| match r {
                     Ok(t) => Message::LoginOk(t),
@@ -269,7 +268,6 @@ impl Application for AnixartApp {
             Message::ReleaseSelected(id) => {
                 self.screen = Screen::Release;
                 self.release_screen = release::ReleaseScreen::new();
-                self.screen_stack.push(Screen::Search);
                 let c = self.client.clone();
                 Command::perform(release_detail(c, id), move |r| match r {
                     Ok(rel) => Message::ReleaseOk(rel),
@@ -419,21 +417,19 @@ impl Application for AnixartApp {
     }
 
     fn view(&mut self) -> Element<'_, Self::Message> {
-        use iced::{button, Button, Column, Row, Text};
-
         let nav_bar: Element<'_, Message> = if self.screen != Screen::Login {
             Row::new()
                 .spacing(8)
                 .push(
-                    Button::new(&mut button::State::new(), Text::new("Feed"))
+                    Button::new(&mut self.nav_feed, Text::new("Feed"))
                         .on_press(Message::Nav(Screen::Feed)),
                 )
                 .push(
-                    Button::new(&mut button::State::new(), Text::new("Search"))
+                    Button::new(&mut self.nav_search, Text::new("Search"))
                         .on_press(Message::Nav(Screen::Search)),
                 )
                 .push(
-                    Button::new(&mut button::State::new(), Text::new("Logout"))
+                    Button::new(&mut self.nav_logout, Text::new("Logout"))
                         .on_press(Message::Logout),
                 )
                 .into()
@@ -454,7 +450,7 @@ impl Application for AnixartApp {
             Screen::Search => self.search_screen.view().map(|m| match m {
                 search::Message::QueryChanged(v) => Message::SearchQuery(v),
                 search::Message::Search => Message::SearchGo,
-                search::Message::SetPage(p) => Message::Noop,
+                search::Message::SetPage(_) => Message::Noop,
                 search::Message::SelectResult(rel) => Message::ReleaseSelected(rel.id),
             }),
             Screen::Release => self.release_screen.view().map(|m| match m {

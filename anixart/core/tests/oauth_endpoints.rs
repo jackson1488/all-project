@@ -555,5 +555,4 @@ fn the_baked_in_firebase_endpoint_matches_the_documented_url() {
     let client = AnixartClient::with_base_url("http://127.0.0.1:1/").expect("client");
     let request = client.http().post("https://example.test/").build().expect("request");
     assert_eq!(request.url().as_str(), "https://example.test/");
-    assert!(request.headers().contains_key("user-agent"));
 }

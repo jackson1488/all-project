@@ -150,7 +150,7 @@ async fn every_provider_maps_to_its_own_path_and_field() {
         assert_eq!(client.token(), Some("tok_social"), "{provider:?}");
 
         let request = mock.request();
-        let expected_head = format!("POST {} HTTP/1.1", provider.endpoint());
+        let expected_head = format!("POST /{} HTTP/1.1", provider.endpoint());
         assert!(request.starts_with(&expected_head), "{request}");
         assert_eq!(
             body_of(&request),
@@ -219,7 +219,7 @@ async fn sign_up_variants_share_the_field_order_for_every_provider() {
         .expect("sign up");
         assert!(resp.is_success(), "{provider:?}");
         let request = mock.request();
-        assert!(request.starts_with(&format!("POST {} HTTP/1.1", provider.endpoint())));
+        assert!(request.starts_with(&format!("POST /{} HTTP/1.1", provider.endpoint())));
         assert_eq!(
             body_of(&request),
             format!("login=lg&email=a%40b.c&{}=cc", provider.credential_field())
@@ -335,8 +335,9 @@ async fn full_telegram_redirect_flow_signs_in() {
         "grant_type=authorization_code&client_id=8789559054&code=CODE\
          &redirect_uri=https%3A%2F%2Fapp1593901251-login.tg.dev%2Ftglogin&code_verifier=verifier"
     );
-    assert_eq!(body_of(&api.request()), "telegramIdToken=FINAL-ID-TOKEN");
-    assert!(api.request().starts_with("POST /auth/telegram HTTP/1.1"));
+    let api_req = api.request();
+    assert_eq!(body_of(&api_req), "telegramIdToken=FINAL-ID-TOKEN");
+    assert!(api_req.starts_with("POST /auth/telegram HTTP/1.1"));
 }
 
 #[tokio::test]

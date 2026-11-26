@@ -1,4 +1,4 @@
-use iced::{button, Button, Column, Container, Element, Length, Scrollable, Text};
+use iced::{button, scrollable, Button, Column, Element, Length, Row, Scrollable, Text};
 
 use anixart_core::FeedItem;
 
@@ -15,6 +15,7 @@ pub struct FeedScreen {
     pub error: Option<String>,
     scroll: scrollable::State,
     next_btn: button::State,
+    item_states: Vec<button::State>,
 }
 
 impl FeedScreen {
@@ -26,10 +27,15 @@ impl FeedScreen {
             error: None,
             scroll: scrollable::State::new(),
             next_btn: button::State::new(),
+            item_states: Vec::new(),
         }
     }
 
     pub fn view(&mut self) -> Element<'_, Message> {
+        while self.item_states.len() < self.items.len() {
+            self.item_states.push(button::State::new());
+        }
+
         let mut col = Column::new()
             .push(Text::new(format!("Feed — page {}", self.page)).size(20));
 
@@ -41,22 +47,23 @@ impl FeedScreen {
             col = col.push(Text::new("Loading…"));
         }
 
-        for item in &self.items {
+        for (i, item) in self.items.iter().enumerate() {
             let title = item.title.as_deref().unwrap_or("(no title)");
             let label = format!(
                 "[{}] {} (votes: {})",
                 item.creation_date, title, item.vote_count
             );
-            let mut btn = Button::new(&mut button::State::new(), Text::new(label).size(14));
-            // FeedItemSelected maps to GoBack in main — we don't handle feed item tap
-            col = col.push(btn);
+            col = col.push(
+                Button::new(&mut self.item_states[i], Text::new(label).size(14)),
+            );
         }
 
-        let nav = iced::Row::new().push(
-            Button::new(&mut self.next_btn, Text::new("Next page"))
-                .on_press(Message::FeedPage(self.page + 1)),
+        col = col.push(
+            Row::new().push(
+                Button::new(&mut self.next_btn, Text::new("Next page"))
+                    .on_press(Message::FeedPage(self.page + 1)),
+            ),
         );
-        col = col.push(nav);
 
         Scrollable::new(&mut self.scroll)
             .push(col)

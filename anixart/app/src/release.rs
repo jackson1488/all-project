@@ -1,4 +1,4 @@
-use iced::{button, scrollable, Button, Column, Container, Element, Length, Row, Scrollable, Text};
+use iced::{button, scrollable, Button, Column, Element, Length, Scrollable, Text};
 
 use anixart_core::{Episode, EpisodeType, Release, Source};
 
@@ -25,6 +25,11 @@ pub struct ReleaseScreen {
     pub loading_episodes: bool,
     pub error: Option<String>,
     scroll: scrollable::State,
+    type_states: Vec<button::State>,
+    source_states: Vec<button::State>,
+    episode_states: Vec<button::State>,
+    back_to_sources_btn: button::State,
+    back_to_types_btn: button::State,
 }
 
 impl ReleaseScreen {
@@ -41,10 +46,25 @@ impl ReleaseScreen {
             loading_episodes: false,
             error: None,
             scroll: scrollable::State::new(),
+            type_states: Vec::new(),
+            source_states: Vec::new(),
+            episode_states: Vec::new(),
+            back_to_sources_btn: button::State::new(),
+            back_to_types_btn: button::State::new(),
         }
     }
 
     pub fn view(&mut self) -> Element<'_, Message> {
+        while self.type_states.len() < self.types.len() {
+            self.type_states.push(button::State::new());
+        }
+        while self.source_states.len() < self.sources.len() {
+            self.source_states.push(button::State::new());
+        }
+        while self.episode_states.len() < self.episodes.len() {
+            self.episode_states.push(button::State::new());
+        }
+
         let mut col = Column::new();
 
         if let Some(ref rel) = self.release {
@@ -73,9 +93,10 @@ impl ReleaseScreen {
                 for (i, t) in self.types.iter().enumerate() {
                     let marker = if self.selected_type_idx == Some(i) { " >" } else { "" };
                     let label = format!("{}{} ({} ep, sub: {})", t.name, marker, t.episodes_count, t.is_sub);
-                    let btn = Button::new(&mut button::State::new(), Text::new(label).size(13))
-                        .on_press(Message::SelectType(i));
-                    col = col.push(btn);
+                    col = col.push(
+                        Button::new(&mut self.type_states[i], Text::new(label).size(13))
+                            .on_press(Message::SelectType(i)),
+                    );
                 }
             } else if self.loading_types {
                 col = col.push(Text::new("Loading voiceovers…"));
@@ -87,9 +108,10 @@ impl ReleaseScreen {
                 for (i, s) in self.sources.iter().enumerate() {
                     let marker = if self.selected_source_idx == Some(i) { " >" } else { "" };
                     let label = format!("{}{} ({} ep)", s.name, marker, s.episodes_count);
-                    let btn = Button::new(&mut button::State::new(), Text::new(label).size(13))
-                        .on_press(Message::SelectSource(i));
-                    col = col.push(btn);
+                    col = col.push(
+                        Button::new(&mut self.source_states[i], Text::new(label).size(13))
+                            .on_press(Message::SelectSource(i)),
+                    );
                 }
             } else if self.selected_type_idx.is_some() && self.loading_sources {
                 col = col.push(Text::new("Loading sources…"));
@@ -98,28 +120,28 @@ impl ReleaseScreen {
             // Episodes
             if self.selected_source_idx.is_some() && !self.episodes.is_empty() {
                 col = col.push(Text::new("——— Episodes ———").size(16));
-                for ep in &self.episodes {
+                for (i, ep) in self.episodes.iter().enumerate() {
                     let ep_name = ep.name.as_deref().unwrap_or(&format!("Ep #{}", ep.position));
                     let watched = if ep.is_watched { " ✓" } else { "" };
                     let label = format!("{ep_name}{watched}");
-                    let btn = Button::new(&mut button::State::new(), Text::new(label).size(13))
-                        .on_press(Message::PlayEpisode(ep.clone()));
-                    col = col.push(btn);
+                    col = col.push(
+                        Button::new(&mut self.episode_states[i], Text::new(label).size(13))
+                            .on_press(Message::PlayEpisode(ep.clone())),
+                    );
                 }
             } else if self.selected_source_idx.is_some() && self.loading_episodes {
                 col = col.push(Text::new("Loading episodes…"));
             }
 
             // Back navigation
-            let back_row = iced::Row::new().spacing(10);
             if self.selected_source_idx.is_some() {
                 col = col.push(
-                    Button::new(&mut button::State::new(), Text::new("← Back to sources"))
+                    Button::new(&mut self.back_to_sources_btn, Text::new("← Back to sources"))
                         .on_press(Message::BackToSources),
                 );
             } else if self.selected_type_idx.is_some() {
                 col = col.push(
-                    Button::new(&mut button::State::new(), Text::new("← Back to types"))
+                    Button::new(&mut self.back_to_types_btn, Text::new("← Back to types"))
                         .on_press(Message::BackToRelease),
                 );
             }

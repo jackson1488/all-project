@@ -1,4 +1,4 @@
-use iced::{button, scrollable, text_input, Button, Column, Container, Element, Length, Row, Scrollable, Text, TextInput};
+use iced::{button, scrollable, text_input, Button, Column, Element, Length, Row, Scrollable, Text, TextInput};
 
 use anixart_core::Release;
 
@@ -19,6 +19,8 @@ pub struct SearchScreen {
     query_state: text_input::State,
     search_btn: button::State,
     scroll: scrollable::State,
+    result_states: Vec<button::State>,
+    next_btn: button::State,
 }
 
 impl SearchScreen {
@@ -32,22 +34,29 @@ impl SearchScreen {
             query_state: text_input::State::new(),
             search_btn: button::State::new(),
             scroll: scrollable::State::new(),
+            result_states: Vec::new(),
+            next_btn: button::State::new(),
         }
     }
 
     pub fn view(&mut self) -> Element<'_, Message> {
+        while self.result_states.len() < self.results.len() {
+            self.result_states.push(button::State::new());
+        }
+
         let input = TextInput::new(
             &mut self.query_state,
             "Search releases…",
             &self.query,
             Message::QueryChanged,
         );
-        let search_btn = Button::new(&mut self.search_btn, Text::new("Search"))
-            .on_press(Message::Search);
 
         let mut col = Column::new()
             .push(Text::new("Search").size(20))
-            .push(Row::new().push(input).push(search_btn));
+            .push(Row::new().push(input).push(
+                Button::new(&mut self.search_btn, Text::new("Search"))
+                    .on_press(Message::Search),
+            ));
 
         if let Some(err) = &self.error {
             col = col.push(Text::new(err).color([1.0, 0.0, 0.0]));
@@ -57,19 +66,21 @@ impl SearchScreen {
             col = col.push(Text::new("Searching…"));
         }
 
-        for rel in &self.results {
+        for (i, rel) in self.results.iter().enumerate() {
             let title = rel.title_ru.as_deref().unwrap_or("(no title)");
             let year = rel.year.as_deref().unwrap_or("?");
             let label = format!("{title} ({year}) — {:.1}", rel.grade);
-            let btn = Button::new(&mut button::State::new(), Text::new(label).size(14))
-                .on_press(Message::SelectResult(rel.clone()));
-            col = col.push(btn);
+            col = col.push(
+                Button::new(&mut self.result_states[i], Text::new(label).size(14))
+                    .on_press(Message::SelectResult(rel.clone())),
+            );
         }
 
         if !self.results.is_empty() {
-            let next_btn = Button::new(&mut button::State::new(), Text::new("Next page"))
-                .on_press(Message::SetPage(self.page + 1));
-            col = col.push(next_btn);
+            col = col.push(
+                Button::new(&mut self.next_btn, Text::new("Next page"))
+                    .on_press(Message::SetPage(self.page + 1)),
+            );
         }
 
         Scrollable::new(&mut self.scroll)

@@ -270,7 +270,7 @@ mod tests {
 #[cfg(test)]
 mod app_tests {
     use crate::app::{play_with_mpv, App, Message, Screen};
-    use crate::login::LoginMethod;
+    use crate::login::{LoginMethod, PasteTarget};
     use crate::release::ReleaseView;
     use crate::session::SessionStore;
 
@@ -701,6 +701,101 @@ mod app_tests {
         assert!(app.feed.loading);
         assert!(app.error.is_none());
         assert!(app.status.as_deref().unwrap().contains("Signed in via Token"));
+    }
+
+    // ── Clipboard: "Paste & Sign In" ───────────────────────────────────────
+
+    #[test]
+    fn clipboard_text_signs_the_token_tab_in() {
+        let mut app = App::with_store(SessionStore::disabled());
+        let _ = app.update(Message::LoginTab(LoginMethod::Token));
+        // Readers print a trailing newline, and iced hands back what it found.
+        let _ = app.update(Message::ClipboardText(
+            PasteTarget::Token,
+            Some("  tok-clipboard \n".into()),
+        ));
+
+        assert_eq!(app.login.token, "tok-clipboard");
+        assert_eq!(app.token.as_deref(), Some("tok-clipboard"));
+        assert_eq!(app.screen, Screen::Feed);
+        assert!(app.feed.loading);
+        assert!(app.error.is_none());
+    }
+
+    #[test]
+    fn an_empty_iced_clipboard_is_handed_to_the_external_readers() {
+        let mut app = App::with_store(SessionStore::disabled());
+
+        // `None`, an empty string and whitespace-only text all mean the same thing:
+        // winit found no selection, so `wl-paste` / `xclip` / `xsel` have to answer.
+        for contents in [None, Some(String::new()), Some("   \n".into())] {
+            let _ = app.update(Message::ClipboardText(PasteTarget::Vk, contents));
+            assert!(app.login.vk_paste.is_empty());
+            assert!(!app.login.loading);
+            assert!(app.error.is_none(), "the fallback is still in flight");
+        }
+    }
+
+    #[test]
+    fn fallback_output_is_pasted_and_submitted() {
+        let mut app = App::with_store(SessionStore::disabled());
+        let _ = app.update(Message::LoginTab(LoginMethod::Vk));
+        let _ = app.update(Message::ClipboardFallback(
+            PasteTarget::Vk,
+            Ok("vk.ru/blank.html#access_token=CLIP&state=s".into()),
+        ));
+
+        assert_eq!(app.login.vk_paste, "vk.ru/blank.html#access_token=CLIP&state=s");
+        // The address-bar URL lost its scheme, so the token is read out of the
+        // rebuilt URL and the request goes out on the VK tab.
+        assert!(app.login.loading);
+        assert!(app.error.is_none());
+    }
+
+    #[test]
+    fn a_telegram_paste_still_needs_the_verifier_the_open_generated() {
+        let mut app = App::with_store(SessionStore::disabled());
+        let _ = app.update(Message::LoginTab(LoginMethod::Telegram));
+        let _ = app.update(Message::ClipboardFallback(
+            PasteTarget::Telegram,
+            Ok("app1593901251-login.tg.dev/tglogin?code=abc123".into()),
+        ));
+
+        assert_eq!(app.login.telegram_paste, "app1593901251-login.tg.dev/tglogin?code=abc123");
+        assert!(!app.login.loading);
+        assert!(app.error.as_deref().unwrap().contains("PKCE verifier"));
+        assert_eq!(app.screen, Screen::Login);
+    }
+
+    #[test]
+    fn a_failed_clipboard_read_names_the_tab_it_was_meant_for() {
+        let mut app = App::with_store(SessionStore::disabled());
+        let _ = app.update(Message::LoginTab(LoginMethod::Google));
+        let _ = app.update(Message::ClipboardFallback(
+            PasteTarget::Google,
+            Err("no clipboard tool could run (wl-paste: No such file or directory)".into()),
+        ));
+
+        let error = app.error.expect("an error");
+        assert!(error.starts_with("Google:"), "{error}");
+        assert!(error.contains("wl-paste"), "{error}");
+        assert!(app.login.google_paste.is_empty());
+        assert!(!app.login.loading);
+        assert_eq!(app.screen, Screen::Login);
+    }
+
+    #[test]
+    fn pressing_paste_clears_the_previous_error_and_ignores_a_second_press() {
+        let mut app = App::with_store(SessionStore::disabled());
+        app.error = Some("stale".into());
+        let _ = app.update(Message::LoginClipboard(PasteTarget::Telegram));
+        assert!(app.error.is_none(), "the read was started");
+
+        // While a sign-in is in flight the button is inert, and so is the message.
+        app.login.loading = true;
+        let _ = app.update(Message::LoginClipboard(PasteTarget::Telegram));
+        assert!(app.error.is_none());
+        assert!(app.login.loading);
     }
 
     #[test]

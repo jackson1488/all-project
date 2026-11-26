@@ -34,6 +34,15 @@
 //! the Android package, so a `http://localhost` redirect would be rejected by
 //! those identity providers — copying the URL the browser lands on is the
 //! equivalent, provider-approved fallback there.
+//!
+//! Copying, though, is the part that breaks on Linux: **Ctrl+V never reaches an
+//! iced 0.13 `text_input` under Wayland**, because winit 0.30 only speaks the
+//! `zwlr-data-control` clipboard protocol that GNOME and KDE do not implement.
+//! Every paste-back tab therefore carries a **“Paste & Sign In”** button
+//! ([`PasteTarget`]): it pulls the selection in through
+//! [`iced::clipboard::read()`] and, when that comes back empty, through the
+//! `wl-paste` / `xclip` / `xsel` readers in [`crate::net::read_clipboard`] — writes it
+//! into the tab's own field and submits the sign-in in the same step.
 
 use anixart_core::oauth;
 use iced::widget::{
@@ -102,6 +111,55 @@ pub enum TelegramPaste {
 /// ids accept the loopback origin, and `http://localhost` is the URI
 /// `google-services.json` registers for `default_web_client_id`.
 pub const GOOGLE_MANUAL_REDIRECT: &str = "http://localhost";
+
+/// Caption of the clipboard button every paste-back tab carries.
+pub const PASTE_BUTTON: &str = "Paste & Sign In";
+
+/// Which login field a **“Paste & Sign In”** button feeds.
+///
+/// Ctrl+V is a dead end in an iced 0.13 `text_input` on Wayland, so the selection
+/// is pulled in on demand instead: [`iced::clipboard::read()`] first, the
+/// `wl-paste` / `xclip` / `xsel` readers of [`crate::net::read_clipboard`] when
+/// that yields nothing. The text lands in the tab's own field and the tab's
+/// sign-in is submitted right away.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PasteTarget {
+    Telegram,
+    Vk,
+    Google,
+    /// The direct Anixart session token.
+    Token,
+}
+
+impl PasteTarget {
+    /// Every paste-back tab, in tab order.
+    pub const ALL: [PasteTarget; 4] = [
+        PasteTarget::Telegram,
+        PasteTarget::Vk,
+        PasteTarget::Google,
+        PasteTarget::Token,
+    ];
+
+    /// The field the clipboard text is written to.
+    pub fn field(self, login: &mut Login) -> &mut String {
+        match self {
+            PasteTarget::Telegram => &mut login.telegram_paste,
+            PasteTarget::Vk => &mut login.vk_paste,
+            PasteTarget::Google => &mut login.google_paste,
+            PasteTarget::Token => &mut login.token,
+        }
+    }
+
+    /// The tab this field belongs to, for captions in error messages.
+    pub fn method(self) -> LoginMethod {
+        match self {
+            PasteTarget::Telegram => LoginMethod::Telegram,
+            PasteTarget::Vk => LoginMethod::Vk,
+            PasteTarget::Google => LoginMethod::Google,
+            PasteTarget::Token => LoginMethod::Token,
+        }
+    }
+}
 
 /// State of the login screen.
 #[derive(Debug)]
@@ -307,6 +365,12 @@ impl Login {
     fn telegram_form(&self) -> Element<'_, Message> {
         Column::new()
             .spacing(10)
+            .push(clipboard_note(
+                "Ctrl+V does not work in this window (iced 0.13 on Wayland): after confirming \
+                 in Telegram, copy the whole address bar URL — app1593901251-login.tg.dev/tglogin?code=… \
+                 — and press “Paste & Sign In”. “Return to app” is an Android-only link, so it \
+                 does nothing on desktop; the address bar is all you need.",
+            ))
             .push(hint(
                 "1. Open the Telegram login in your browser and allow the app. \
                  2. After confirming, the browser lands on \
@@ -326,6 +390,7 @@ impl Login {
                 .on_input(Message::LoginTelegramPaste)
                 .on_submit(Message::LoginTelegramSubmit)
                 .padding(10))
+            .push(self.paste_button(PasteTarget::Telegram))
             .push(self.submit("Continue with Telegram", Message::LoginTelegramSubmit))
             .into()
     }
@@ -333,6 +398,10 @@ impl Login {
     fn vk_form(&self) -> Element<'_, Message> {
         Column::new()
             .spacing(10)
+            .push(clipboard_note(
+                "Ctrl+V does not work in this window (iced 0.13 on Wayland): copy the \
+                 redirect URL in the browser and press “Paste & Sign In” instead.",
+            ))
             .push(hint(
                 "Open VK ID in the browser and paste the URL it redirects to \
                  (it carries access_token=…), or paste a VK ID access token with \
@@ -346,6 +415,7 @@ impl Login {
                 .on_input(Message::LoginVkPaste)
                 .on_submit(Message::LoginVkSubmit)
                 .padding(10))
+            .push(self.paste_button(PasteTarget::Vk))
             .push(self.submit("Continue with VK", Message::LoginVkSubmit))
             .into()
     }
@@ -394,6 +464,7 @@ impl Login {
                 .on_input(Message::LoginGooglePaste)
                 .on_submit(Message::LoginGoogleSubmit)
                 .padding(10))
+            .push(self.paste_button(PasteTarget::Google))
             .push(self.submit("Continue with Google", Message::LoginGoogleSubmit))
             .into()
     }
@@ -410,6 +481,7 @@ impl Login {
                 .on_input(Message::LoginTokenPaste)
                 .on_submit(Message::LoginTokenSubmit)
                 .padding(10))
+            .push(self.paste_button(PasteTarget::Token))
             .push(self.submit("Use this token", Message::LoginTokenSubmit))
             .into()
     }
@@ -427,6 +499,17 @@ impl Login {
             .on_press(message)
             .into()
     }
+
+    /// **“Paste & Sign In”** — reads the selection and submits this tab with it,
+    /// so a keyboard paste is never needed. Inert while a sign-in is in flight,
+    /// exactly like [`Login::submit`].
+    fn paste_button(&self, target: PasteTarget) -> Element<'_, Message> {
+        button(text(PASTE_BUTTON).size(14))
+            .width(Length::Fill)
+            .padding(10)
+            .on_press_maybe((!self.loading).then_some(Message::LoginClipboard(target)))
+            .into()
+    }
 }
 
 fn hint(text_: &str) -> Element<'_, Message> {
@@ -437,6 +520,34 @@ fn hint(text_: &str) -> Element<'_, Message> {
         .into()
 }
 
+/// The one-line warning that explains the clipboard button: Ctrl+V never lands
+/// in an iced 0.13 `text_input` under Wayland.
+fn clipboard_note(text_: &str) -> Element<'_, Message> {
+    Row::new()
+        .spacing(10)
+        .push(text(text_).size(13).color([0.95, 0.8, 0.45]))
+        .push(horizontal_space())
+        .into()
+}
+
+/// Restores the `https://` a browser's address bar hides, so a URL copied without
+/// its scheme still parses. A bare token, or a lone `?code=…` / `code=…` query,
+/// is left exactly as it came.
+fn with_scheme(input: &str) -> String {
+    let input = input.trim();
+    if input.contains("://") {
+        return input.to_owned();
+    }
+
+    // Only a `host/path`-shaped input is a URL: the host carries a dot, and
+    // something follows it.
+    let host = input.split(['/', '?', '#']).next().unwrap_or(input);
+    if input.contains(['/', '?', '#']) && host.contains('.') {
+        return format!("https://{input}");
+    }
+    input.to_owned()
+}
+
 /// Distinguishes a pasted redirect URI from a bare Telegram `id_token`.
 pub fn classify_telegram_paste(input: &str) -> Option<TelegramPaste> {
     let input = input.trim();
@@ -445,7 +556,7 @@ pub fn classify_telegram_paste(input: &str) -> Option<TelegramPaste> {
     }
     // `tg://login?code=…` and the https redirect both count as a redirect URI.
     if input.contains("://") || input.contains("code=") {
-        return Some(TelegramPaste::Redirect(input.to_owned()));
+        return Some(TelegramPaste::Redirect(with_scheme(input)));
     }
     Some(TelegramPaste::IdToken(input.to_owned()))
 }
@@ -456,10 +567,17 @@ pub fn vk_access_token(input: &str) -> Option<String> {
     if input.is_empty() {
         return None;
     }
+    // A redirect copied straight out of the address bar may be missing its
+    // scheme; a bare token must stay untouched.
+    let input = if input.contains("access_token=") {
+        with_scheme(input)
+    } else {
+        input.to_owned()
+    };
     if input.contains("://") {
-        return param_in_url(input, "access_token");
+        return param_in_url(&input, "access_token");
     }
-    Some(input.to_owned())
+    Some(input)
 }
 
 /// Pulls a Google / Firebase ID token out of a pasted redirect URL, a bare
@@ -786,5 +904,55 @@ mod tests {
         assert_eq!(a.len(), 43);
         assert!(a.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
         assert_ne!(a, random_verifier());
+    }
+
+    #[test]
+    fn paste_targets_own_their_tab_field() {
+        let mut login = Login::default();
+        for target in PasteTarget::ALL {
+            let label = target.method().as_str();
+            *target.field(&mut login) = format!("clip-{label}");
+        }
+
+        assert_eq!(login.telegram_paste, "clip-telegram");
+        assert_eq!(login.vk_paste, "clip-vk");
+        assert_eq!(login.google_paste, "clip-google");
+        assert_eq!(login.token, "clip-token");
+
+        // Every target is a paste-back tab, never the password one.
+        assert!(PasteTarget::ALL.iter().all(|t| t.method() != LoginMethod::Password));
+        assert_eq!(PasteTarget::ALL.len(), 4);
+    }
+
+    #[test]
+    fn an_address_bar_url_gets_its_scheme_back() {
+        // Browsers hide `https://`, so that is what gets copied out of the bar.
+        assert_eq!(
+            classify_telegram_paste("app1593901251-login.tg.dev/tglogin?code=abc&state=1"),
+            Some(TelegramPaste::Redirect(
+                "https://app1593901251-login.tg.dev/tglogin?code=abc&state=1".into()
+            ))
+        );
+        assert_eq!(
+            vk_access_token("vk.ru/blank.html#access_token=FRA&state=s").as_deref(),
+            Some("FRA")
+        );
+        // A lone query or a bare token must not grow a host.
+        assert_eq!(
+            classify_telegram_paste("code=abc"),
+            Some(TelegramPaste::Redirect("code=abc".into()))
+        );
+        assert_eq!(vk_access_token("PLAIN").as_deref(), Some("PLAIN"));
+        assert_eq!(
+            classify_telegram_paste("eyJhbGciOiJSUzI1NiJ9.eyJhdWQiOiIxIn0.signature"),
+            Some(TelegramPaste::IdToken(
+                "eyJhbGciOiJSUzI1NiJ9.eyJhdWQiOiIxIn0.signature".into()
+            ))
+        );
+    }
+
+    #[test]
+    fn the_clipboard_button_offers_one_caption() {
+        assert_eq!(PASTE_BUTTON, "Paste & Sign In");
     }
 }

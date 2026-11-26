@@ -7,7 +7,13 @@
 //! listener ([`google_callback::Listener`]) that the browser hands its
 //! implicit-flow redirect back to; the captured credential is exchanged for a
 //! **Firebase** ID token through `anixart_core::oauth` before `POST /auth/google`.
+//!
+//! [`read_clipboard`] is the other half of the login screen: iced 0.13 cannot read
+//! the clipboard on a GNOME / KDE Wayland session (winit 0.30 only speaks
+//! `zwlr-data-control`), so the “Paste & Sign In” button falls back to shelling out
+//! to `wl-paste` / `xclip` / `xsel`.
 
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use anixart_core::{
@@ -591,6 +597,137 @@ pub mod google_callback {
     }
 }
 
+/// How long the external clipboard readers are given between them.
+const CLIPBOARD_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// One external clipboard reader: the executable plus its fixed argument list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClipboardReader {
+    /// Executable name, looked up in `PATH`.
+    pub program: &'static str,
+    /// Arguments that make it print the selection and exit.
+    pub args: &'static [&'static str],
+}
+
+impl ClipboardReader {
+    /// Runs the reader. `Ok(None)` when it produced nothing usable, `Err` with the
+    /// reason it could not run at all.
+    fn run(&self) -> Result<Option<String>, String> {
+        let output = Command::new(self.program)
+            .args(self.args)
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .map_err(|e| e.to_string())?;
+
+        if !output.status.success() {
+            return Err(format!("failed ({})", output.status));
+        }
+        Ok(clipboard_text(&output.stdout))
+    }
+}
+
+/// Clipboard readers tried in order once `iced::clipboard::read()` comes back
+/// empty — the normal outcome on a GNOME / KDE Wayland session, where winit 0.30
+/// finds no `zwlr_data_control_manager_v1` and has no way to ask for the selection.
+///
+/// Only text targets are requested, so an image on the clipboard can never be
+/// served back as bytes; the primary selection is tried last, because a highlight
+/// copied there is what the user most likely meant.
+pub const CLIPBOARD_READERS: &[ClipboardReader] = &[
+    ClipboardReader {
+        program: "wl-paste",
+        args: &["--no-newline", "--type", "text"],
+    },
+    ClipboardReader {
+        program: "xclip",
+        args: &["-selection", "clipboard", "-out"],
+    },
+    ClipboardReader {
+        program: "xsel",
+        args: &["--clipboard", "--output"],
+    },
+    ClipboardReader {
+        program: "wl-paste",
+        args: &["--no-newline", "--type", "text", "--primary"],
+    },
+    ClipboardReader {
+        program: "xclip",
+        args: &["-selection", "primary", "-out"],
+    },
+    ClipboardReader {
+        program: "xsel",
+        args: &["--primary", "--output"],
+    },
+];
+
+/// Usable text out of a reader's stdout: UTF-8, trimmed, and rejected when it is
+/// empty or looks like an image dump.
+pub fn clipboard_text(stdout: &[u8]) -> Option<String> {
+    if stdout.contains(&0) || stdout.starts_with(b"\x89PNG") {
+        return None;
+    }
+    let text = String::from_utf8_lossy(stdout).trim().to_owned();
+    (!text.is_empty()).then_some(text)
+}
+
+/// Reads the clipboard through [`CLIPBOARD_READERS`], first usable answer wins.
+///
+/// The readers are blocking, so they run on a tokio blocking thread and are bounded
+/// by [`CLIPBOARD_TIMEOUT`] — a clipboard tool with no session behind it must never
+/// pin the login screen.
+pub async fn read_clipboard() -> Result<String, String> {
+    let waited = tokio::time::timeout(
+        CLIPBOARD_TIMEOUT,
+        tokio::task::spawn_blocking(read_clipboard_blocking),
+    )
+    .await;
+
+    match waited {
+        Err(_) => {
+            let secs = CLIPBOARD_TIMEOUT.as_secs();
+            Err(format!(
+                "the clipboard tools (wl-paste / xclip / xsel) took longer than {secs} s. \
+                 Install wl-clipboard or xclip and try again, or type the value into the field"
+            ))
+        }
+        Ok(Err(crashed)) => Err(format!("the clipboard reader crashed: {crashed}")),
+        Ok(Ok(result)) => result,
+    }
+}
+
+/// Tries every reader in turn and reports all of them when none worked.
+fn read_clipboard_blocking() -> Result<String, String> {
+    let mut failures = Vec::new();
+    let mut saw_text_target = false;
+
+    for reader in CLIPBOARD_READERS {
+        let program = reader.program;
+        match reader.run() {
+            Ok(Some(text)) => return Ok(text),
+            Ok(None) => {
+                saw_text_target = true;
+                failures.push(format!("{program}: no text"));
+            }
+            Err(reason) => failures.push(format!("{program}: {reason}")),
+        }
+    }
+
+    Err(if saw_text_target {
+        format!(
+            "the clipboard holds no readable text ({}). Copy the URL or token in the \
+             browser first, then press “Paste & Sign In” again",
+            failures.join(", ")
+        )
+    } else {
+        format!(
+            "no clipboard tool could run ({}). Install wl-clipboard or xclip, or type the \
+             value into the field",
+            failures.join(", ")
+        )
+    })
+}
+
 /// `GET /article/all/{page}` — feed page.
 pub async fn feed(token: Option<String>, page: u32) -> Result<Pageable<FeedItem>, String> {
     let client = api_client(token)?;
@@ -729,5 +866,61 @@ mod tests {
     fn the_callback_timeout_leaves_room_for_a_browser_login() {
         // Long enough to read a 2FA prompt, short enough not to pin a port forever.
         assert!(CALLBACK_TIMEOUT.as_secs() >= 60 && CALLBACK_TIMEOUT.as_secs() <= 600);
+    }
+
+    #[test]
+    fn clipboard_text_trims_what_a_reader_printed() {
+        assert_eq!(
+            clipboard_text(b"https://app1593901251-login.tg.dev/tglogin?code=abc\n").as_deref(),
+            Some("https://app1593901251-login.tg.dev/tglogin?code=abc")
+        );
+        assert_eq!(
+            clipboard_text("  profileToken\t\n".as_bytes()).as_deref(),
+            Some("profileToken")
+        );
+        assert_eq!(clipboard_text(b""), None);
+        assert_eq!(clipboard_text(b"   \n"), None);
+    }
+
+    #[test]
+    fn clipboard_text_refuses_an_image_selection() {
+        // `wl-paste` would serve the PNG the user screenshotted instead of text.
+        assert_eq!(clipboard_text(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"), None);
+        assert_eq!(clipboard_text(&[0x01, 0x00, 0x02, 0x00]), None);
+    }
+
+    #[test]
+    fn clipboard_readers_cover_wayland_and_x11() {
+        let programs: Vec<&str> = CLIPBOARD_READERS.iter().map(|r| r.program).collect();
+        for expected in ["wl-paste", "xclip", "xsel"] {
+            assert!(programs.contains(&expected), "{expected} is never tried");
+        }
+        // Every candidate needs arguments: a bare `wl-paste` would happily dump an
+        // image, and `xclip` / `xsel` without a selection name read the wrong clip.
+        assert!(
+            CLIPBOARD_READERS.iter().all(|r| !r.args.is_empty()),
+            "a reader must ask for a text selection"
+        );
+        assert!(CLIPBOARD_READERS[0].args.contains(&"--type"));
+        // The primary selection is only reached after the clipboard one.
+        assert!(CLIPBOARD_READERS.iter().skip(3).any(|r| r.args.contains(&"--primary")));
+    }
+
+    #[test]
+    fn the_clipboard_timeout_is_short_enough_to_feel_instant() {
+        assert!(CLIPBOARD_TIMEOUT.as_secs() >= 2 && CLIPBOARD_TIMEOUT.as_secs() <= 30);
+    }
+
+    /// No Wayland / X session on the CI runner: the readers must fail fast and name
+    /// themselves, never hang and never hand back an empty string.
+    #[tokio::test]
+    async fn read_clipboard_answers_even_without_a_desktop_session() {
+        match read_clipboard().await {
+            Ok(text) => assert!(!text.trim().is_empty()),
+            Err(error) => {
+                assert!(error.contains("wl-paste"), "{error}");
+                assert!(error.to_lowercase().contains("clipboard"), "{error}");
+            }
+        }
     }
 }

@@ -10,7 +10,7 @@ use iced::widget::{button, horizontal_space, text, Column, Row};
 use iced::{Element, Task, Theme};
 
 use crate::feed::Feed;
-use crate::login::{Login, LoginMethod, TelegramPaste};
+use crate::login::{Login, LoginMethod, PasteTarget, TelegramPaste};
 use crate::net;
 use crate::release::ReleaseView;
 use crate::search::Search;
@@ -63,6 +63,16 @@ pub enum Message {
     // ── Login: direct Anixart token ────────────────────────────────────────
     LoginTokenPaste(String),
     LoginTokenSubmit,
+
+    // ── Login: clipboard ("Paste & Sign In") ───────────────────────────────
+    /// The button was pressed. Ctrl+V never reaches an iced 0.13 `text_input` on
+    /// Wayland, so the selection is pulled in here instead.
+    LoginClipboard(PasteTarget),
+    /// What `iced::clipboard::read()` returned — `None` / blank sends the read on
+    /// to the external `wl-paste` / `xclip` / `xsel` readers.
+    ClipboardText(PasteTarget, Option<String>),
+    /// What those readers returned.
+    ClipboardFallback(PasteTarget, Result<String, String>),
 
     /// Every login method converges here with the Anixart session token.
     LoggedIn(Result<String, String>),
@@ -274,43 +284,7 @@ impl App {
                 self.login.telegram_paste = value;
                 Task::none()
             }
-            Message::LoginTelegramSubmit => {
-                if self.login.loading {
-                    return Task::none();
-                }
-                let credential = match self.login.telegram_credential() {
-                    Some(credential) => credential,
-                    None => {
-                        self.error =
-                            Some("Paste the redirect URL or a Telegram id_token".to_owned());
-                        return Task::none();
-                    }
-                };
-
-                self.error = None;
-                self.login.loading = true;
-                match credential {
-                    TelegramPaste::Redirect(_) if self.login.telegram_verifier.is_empty() => {
-                        self.login.loading = false;
-                        self.error = Some(
-                            "Open the Telegram login first — the code needs the PKCE verifier \
-                             that action generated"
-                                .to_owned(),
-                        );
-                        Task::none()
-                    }
-                    TelegramPaste::Redirect(url) => {
-                        let verifier = self.login.telegram_verifier.clone();
-                        Task::perform(
-                            net::sign_in_telegram_redirect(url, verifier),
-                            Message::LoggedIn,
-                        )
-                    }
-                    TelegramPaste::IdToken(token) => {
-                        Task::perform(net::sign_in_telegram_id_token(token), Message::LoggedIn)
-                    }
-                }
-            }
+            Message::LoginTelegramSubmit => self.submit_telegram(),
             Message::LoginVkOpen => {
                 let url = self.login.prepare_vk();
                 self.error = None;
@@ -327,25 +301,7 @@ impl App {
                 self.login.vk_paste = value;
                 Task::none()
             }
-            Message::LoginVkSubmit => {
-                if self.login.loading {
-                    return Task::none();
-                }
-                match self.login.vk_credential() {
-                    Some(token) => {
-                        self.error = None;
-                        self.login.loading = true;
-                        Task::perform(net::sign_in_vk(token), Message::LoggedIn)
-                    }
-                    None => {
-                        self.error = Some(
-                            "Paste the VK ID redirect URL (with access_token=…) or an access token"
-                                .to_owned(),
-                        );
-                        Task::none()
-                    }
-                }
-            }
+            Message::LoginVkSubmit => self.submit_vk(),
             Message::LoginGoogleBrowser => {
                 if self.login.loading {
                     return Task::none();
@@ -394,39 +350,41 @@ impl App {
                 self.login.google_paste = value;
                 Task::none()
             }
-            Message::LoginGoogleSubmit => {
-                if self.login.loading {
-                    return Task::none();
-                }
-                let pasted = self.login.google_paste.trim().to_owned();
-                if pasted.is_empty() {
-                    self.error = Some(
-                        "Use “Sign in with Google (Browser)” for a one-click login, or paste the \
-                         Google redirect URL (id_token=… / access_token=…) or a token"
-                            .to_owned(),
-                    );
-                    return Task::none();
-                }
-                self.error = None;
-                self.login.loading = true;
-                Task::perform(
-                    net::sign_in_google_auto(pasted, self.login.effective_firebase_api_key()),
-                    Message::LoggedIn,
-                )
-            }
+            Message::LoginGoogleSubmit => self.submit_google(),
             Message::LoginTokenPaste(value) => {
                 self.login.token = value;
                 Task::none()
             }
-            Message::LoginTokenSubmit => {
-                let token = self.login.token.trim().to_owned();
-                if token.is_empty() {
-                    self.error = Some("Paste an Anixart session token first".to_owned());
+            Message::LoginTokenSubmit => self.submit_token(),
+
+            // ── Login: clipboard ("Paste & Sign In") ───────────────────────
+            Message::LoginClipboard(target) => {
+                if self.login.loading {
                     return Task::none();
                 }
                 self.error = None;
-                self.accept_token(token)
+                // `iced::clipboard::read()` only runs once its Task is handed back
+                // to the runtime, so the empty case is settled by the next message.
+                iced::clipboard::read()
+                    .map(move |contents| Message::ClipboardText(target, contents))
             }
+            Message::ClipboardText(target, contents) => {
+                match contents.filter(|text| !text.trim().is_empty()) {
+                    Some(text) => self.paste_and_sign_in(target, text),
+                    None => Task::perform(net::read_clipboard(), move |result| {
+                        Message::ClipboardFallback(target, result)
+                    }),
+                }
+            }
+            Message::ClipboardFallback(target, result) => match result {
+                Ok(text) => self.paste_and_sign_in(target, text),
+                Err(error) => {
+                    self.login.loading = false;
+                    let label = target.method().label();
+                    self.error = Some(format!("{label}: {error}"));
+                    Task::none()
+                }
+            },
             Message::LoggedIn(Ok(token)) => self.accept_token(token),
             Message::LoggedIn(Err(error)) => {
                 self.login.loading = false;
@@ -629,6 +587,112 @@ impl App {
                 Task::none()
             }
         }
+    }
+
+    /// Writes clipboard text into a tab's field and signs in with it in the same
+    /// step — the whole point of the “Paste & Sign In” button, which stands in for
+    /// a Ctrl+V that iced 0.13 cannot deliver on Wayland.
+    fn paste_and_sign_in(&mut self, target: PasteTarget, text: String) -> Task<Message> {
+        let text = text.trim().to_owned();
+        *target.field(&mut self.login) = text;
+        match target {
+            PasteTarget::Telegram => self.submit_telegram(),
+            PasteTarget::Vk => self.submit_vk(),
+            PasteTarget::Google => self.submit_google(),
+            PasteTarget::Token => self.submit_token(),
+        }
+    }
+
+    /// `Message::LoginTelegramSubmit` — the Telegram paste-back sign-in, shared by
+    /// the Enter key, the “Continue” button and the clipboard.
+    fn submit_telegram(&mut self) -> Task<Message> {
+        if self.login.loading {
+            return Task::none();
+        }
+        let credential = match self.login.telegram_credential() {
+            Some(credential) => credential,
+            None => {
+                self.error = Some("Paste the redirect URL or a Telegram id_token".to_owned());
+                return Task::none();
+            }
+        };
+
+        self.error = None;
+        self.login.loading = true;
+        match credential {
+            TelegramPaste::Redirect(_) if self.login.telegram_verifier.is_empty() => {
+                self.login.loading = false;
+                self.error = Some(
+                    "Open the Telegram login first — the code needs the PKCE verifier \
+                     that action generated"
+                        .to_owned(),
+                );
+                Task::none()
+            }
+            TelegramPaste::Redirect(url) => {
+                let verifier = self.login.telegram_verifier.clone();
+                Task::perform(net::sign_in_telegram_redirect(url, verifier), Message::LoggedIn)
+            }
+            TelegramPaste::IdToken(token) => {
+                Task::perform(net::sign_in_telegram_id_token(token), Message::LoggedIn)
+            }
+        }
+    }
+
+    /// `Message::LoginVkSubmit` — a VK ID access token, from a redirect URL or typed.
+    fn submit_vk(&mut self) -> Task<Message> {
+        if self.login.loading {
+            return Task::none();
+        }
+        match self.login.vk_credential() {
+            Some(token) => {
+                self.error = None;
+                self.login.loading = true;
+                Task::perform(net::sign_in_vk(token), Message::LoggedIn)
+            }
+            None => {
+                self.error = Some(
+                    "Paste the VK ID redirect URL (with access_token=…) or an access token"
+                        .to_owned(),
+                );
+                Task::none()
+            }
+        }
+    }
+
+    /// `Message::LoginGoogleSubmit` — any Google-shaped credential goes through the
+    /// automatic Firebase exchange.
+    fn submit_google(&mut self) -> Task<Message> {
+        if self.login.loading {
+            return Task::none();
+        }
+        let pasted = self.login.google_paste.trim().to_owned();
+        if pasted.is_empty() {
+            self.error = Some(
+                "Use “Sign in with Google (Browser)” for a one-click login, or paste the \
+                 Google redirect URL (id_token=… / access_token=…) or a token"
+                    .to_owned(),
+            );
+            return Task::none();
+        }
+        self.error = None;
+        self.login.loading = true;
+        Task::perform(
+            net::sign_in_google_auto(pasted, self.login.effective_firebase_api_key()),
+            Message::LoggedIn,
+        )
+    }
+
+    /// `Message::LoginTokenSubmit` — an existing session token, accepted without a
+    /// network call.
+    fn submit_token(&mut self) -> Task<Message> {
+        let token = self.login.token.trim().to_owned();
+        if token.is_empty() {
+            self.error = Some("Paste an Anixart session token first".to_owned());
+            return Task::none();
+        }
+        self.error = None;
+        self.accept_token(token)
     }
 
     /// Root view: navigation bar, status / error banners, and the active screen.

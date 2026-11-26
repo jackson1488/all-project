@@ -167,7 +167,7 @@ mod tests {
 
         let q2 = parse_release_episodes(fixture, 2);
         assert_eq!(q2.get("720p").unwrap(), "https://cache.libria.fun/ep2/720.m3u8");
-        assert!(q2.get("1080p").is_none());
+        assert!(!q2.contains_key("1080p"));
     }
 
     #[test]

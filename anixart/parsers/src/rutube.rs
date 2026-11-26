@@ -152,7 +152,7 @@ pub fn parse_m3u8_variants(
     }
 
     // Sort by bandwidth descending
-    variants.sort_by(|a, b| b.bandwidth.cmp(&a.bandwidth));
+    variants.sort_by_key(|a| std::cmp::Reverse(a.bandwidth));
 
     let mut qualities = HashMap::new();
     for v in variants {

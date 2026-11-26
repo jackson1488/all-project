@@ -59,7 +59,7 @@ pub fn parse_release_episodes(json_str: &str, ep_ordinal: i32) -> HashMap<String
 /// Scrapes embed HTML as a fallback when the AniLibria releases API is unavailable or missing qualities.
 pub fn parse_embed_html(html: &str, ep_ordinal: i32) -> HashMap<String, String> {
     let mut qualities = HashMap::new();
-    let re_file_pat = format!(r#""s{ep_ordinal}".*?"file":"(.*?)"#);
+    let re_file_pat = format!(r##""s{ep_ordinal}".*?"file":"(.*?)"##);
     if let Ok(re_file) = Regex::new(&re_file_pat) {
         if let Some(caps) = re_file.captures(html) {
             if let Some(file_matched) = caps.get(1) {

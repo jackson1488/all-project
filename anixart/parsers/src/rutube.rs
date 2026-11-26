@@ -30,7 +30,7 @@ struct PlayOptionsResponse {
 /// Extracts RuTube video ID and optional private token `p` from a URL.
 pub fn extract_video_id(url: &str) -> Option<(String, Option<String>)> {
     // 1. Private video: rutube.ru/video/private/<id>/?p=<p>
-    let re_private = Regex::new(r#"rutube\.ru/video/private/([a-f0-9]{32})(?:\?p=([^&]+))?"#).ok()?;
+    let re_private = Regex::new(r#"rutube\.ru/video/private/([a-f0-9]{32})/?(?:\?p=([^&]+))?"#).ok()?;
     if let Some(caps) = re_private.captures(url) {
         let id = caps.get(1)?.as_str().to_string();
         let p = caps.get(2).map(|m| m.as_str().to_string());

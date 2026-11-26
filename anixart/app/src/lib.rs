@@ -401,7 +401,7 @@ mod app_tests {
         let _ = app.update(Message::LoginVkSubmit);
         assert!(app.login.loading);
 
-        let _ = app.update(Message::LoggedIn(Err("Anixart отверг credencial".into())));
+        let _ = app.update(Message::LoggedIn(Err("Anixart отверг креденциал".into())));
         assert!(!app.login.loading);
         assert_eq!(app.screen, Screen::Login);
 

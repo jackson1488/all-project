@@ -119,7 +119,7 @@ pub enum Message {
     LoginVkPaste(String),
     LoginVkSubmit,
 
-    // ── Вход: Yandex ID (иммитуый поток, токен из адресной строки) ─────────
+    // ── Вход: Yandex ID (имплицитный поток, токен из адресной строки) ─────────
     LoginYandexOpen,
     LoginYandexPaste(String),
     LoginYandexSubmit,
@@ -1074,7 +1074,7 @@ impl App {
         }
     }
 
-    /// Вход через Yandex ID: access token иммитуого редиректа или вставный напрямую.
+    /// Вход через Yandex ID: access token имплицитного редиректа или вставный напрямую.
     fn submit_yandex(&mut self) -> Task<Message> {
         if self.login.loading {
             return Task::none();
@@ -1096,7 +1096,7 @@ impl App {
         }
     }
 
-    /// Вход через Google: любой Google-форматный credencial идёт через автоматический
+    /// Вход через Google: любой Google-форматный креденциал идёт через автоматический
     /// обмен в Firebase.
     fn submit_google(&mut self) -> Task<Message> {
         if self.login.loading {

@@ -13,16 +13,16 @@
 //!   с verifier'ом этого окна) или `id_token`, полученный где угодно ещё.
 //! * **VK** — VK ID. Браузер открывается на authorize URL VK ID; вставляют обратно
 //!   редирект с `access_token` или сам токен.
-//! * **Yandex** — Yandex ID, иммитуый поток (`response_type=token`). Клиентский id
+//! * **Yandex** — Yandex ID, имплицитный поток (`response_type=token`). Клиентский id
 //!   и хост берёт из `anixart_core::oauth`, редирект привязан к Android-пакету,
-//!   поэтому единственный способ вернуть credencial — скопировать адресную строку.
+//!   поэтому единственный способ вернуть креденциал — скопировать адресную строку.
 //! * **Google** — один клик, без поиска токена. Google OAuth web client id и
 //!   Firebase API key, которые возит с собой APK Anixart, уже вписаны
 //!   (`oauth::GOOGLE_WEB_CLIENT_ID`, `oauth::FIREBASE_API_KEY`), и кнопка
 //!   **«Войти через Google (браузер)»** поднимает loopback-слушатель на
-//!   `127.0.0.1:0`, открывает иммитуый authorize URL, ловит редирект (страница-релей
+//!   `127.0.0.1:0`, открывает имплицитный authorize URL, ловит редирект (страница-посредник
 //!   читает фрагмент URL и отправляет его обратно POST'ом), меняет
-//!   credencial Google на **Firebase** ID token через
+//!   креденциал Google на **Firebase** ID token через
 //!   `identitytoolkit.googleapis.com` `accounts:signInWithIdp` и постит его в
 //!   `auth/google`. Поле вставки остаётся универсальным запасным путём.
 //! * **Токен** — уже выпущенный токен сессии принимается мгновенно, без запроса.
@@ -275,7 +275,7 @@ impl Login {
         )
     }
 
-    /// Authorize URL Yandex ID иммитуого потока.
+    /// Authorize URL Yandex ID имплицитного потока.
     ///
     /// Редирект привязан к Android-пакету (`yx<client_id>.oauth.yandex.ru/auth/
     /// finish?platform=android`), поэтому в браузере он приземляется на страницу,
@@ -288,7 +288,7 @@ impl Login {
         oauth::yandex_authorize_url(oauth::YANDEX_CLIENT_ID, &host, &state)
     }
 
-    /// Authorize URL Google иммитуого потока для **ручного** flow со вставкой
+    /// Authorize URL Google имплицитного потока для **ручного** flow со вставкой
     /// (кнопка одного клика использует вместо него loopback-слушатель).
     ///
     /// `response_type=token id_token` просит у Google оба credencila, поэтому URL,
@@ -501,7 +501,7 @@ impl Login {
                 "Достаточно одного клика — ничего искать не нужно. Client id Google \
                  и Firebase API key ниже — те самые, что возит с собой APK Anixart. \
                  «Войти через Google (браузер)» слушает локальный порт, открывает \
-                 Google в браузере, забирает credencial из редиректа, на который тот \
+                 Google в браузере, забирает креденциал из редиректа, на который тот \
                  приземлится, меняет его на Firebase ID token (identitytoolkit \
                  accounts:signInWithIdp) и входит через auth/google сам."
                     .to_owned(),
@@ -665,7 +665,7 @@ pub fn classify_telegram_paste(input: &str) -> Option<TelegramPaste> {
 
 /// Вытаскивает access token из вставленного URL редиректа или из самого токена.
 ///
-/// Работает и для VK ID, и для Yandex ID: оба провайдера отдают иммитуый или
+/// Работает и для VK ID, и для Yandex ID: оба провайдера отдают имплицитный или
 /// code-редирект, у которого токен лежит в `access_token=` (в query или в
 /// фрагменте), а голый ввод — это уже сам токен.
 pub fn vk_access_token(input: &str) -> Option<String> {
@@ -691,15 +691,15 @@ pub fn google_id_token(input: &str) -> Option<String> {
     google_credential_from(input).map(|(token, _)| token)
 }
 
-/// Разбирает всё, что породил Google-flow, на credencial для Firebase плюс ключ
+/// Разбирает всё, что породил Google-flow, на креденциал для Firebase плюс ключ
 /// `postBody`, в котором он пришёл.
 ///
 /// Принимаются: полный URL редиректа (query *или* фрагмент), одиночный фрагмент /
-/// query, который отдал loopback-релей, и голый токен — JWT из трёх сегментов
+/// query, который отдал loopback-посредник, и голый токен — JWT из трёх сегментов
 /// считается уже подписанным ID token, всё остальное (`ya29.…`) — OAuth access
 /// token.
 ///
-/// `None`, когда ввод несёт только ошибку OAuth или не несёт credencial вовсе.
+/// `None`, когда ввод несёт только ошибку OAuth или не несёт креденциал вовсе.
 pub fn google_credential_from(input: &str) -> Option<(String, bool)> {
     let input = input.trim();
     if input.is_empty() {
@@ -718,7 +718,7 @@ pub fn google_credential_from(input: &str) -> Option<(String, bool)> {
     if let Some(token) = lookup("access_token") {
         return Some((token, true));
     }
-    // Страница, у которой только `error=…` (или ничего), — не credencial.
+    // Страница, у которой только `error=…` (или ничего), — не креденциал.
     if input.contains("error=") || (input.contains("://") && !input.contains('=')) {
         return None;
     }
@@ -765,7 +765,7 @@ fn param_in_pairs(pairs: &str, key: &str) -> Option<String> {
     Some(value.into_owned())
 }
 
-/// Читает `key` из query, падая обратно на фрагмент URL (иммитуый OAuth flow носит
+/// Читает `key` из query, падая обратно на фрагмент URL (имплицитный OAuth flow носит
 /// параметры там).
 fn param_in_url(url: &str, key: &str) -> Option<String> {
     let parsed = reqwest::Url::parse(url).ok()?;
@@ -933,7 +933,7 @@ mod tests {
             google_credential_from("#access_token=ya29.a0AfB&token_type=Bearer"),
             Some(("ya29.a0AfB".to_owned(), true))
         );
-        // Loopback-релей постит фрагмент без ведущего `#`.
+        // Loopback-посредник постит фрагмент без ведущего `#`.
         assert_eq!(
             google_credential_from("id_token=FB.JWT.tok&scope=openid%20email"),
             Some(("FB.JWT.tok".to_owned(), false))
@@ -951,7 +951,7 @@ mod tests {
             google_credential_from("ya29.a0AfB_byC"),
             Some(("ya29.a0AfB_byC".to_owned(), true))
         );
-        // Ошибка OAuth — не credencial.
+        // Ошибка OAuth — не креденциал.
         assert_eq!(
             google_credential_from("https://localhost/#error=access_denied&error_description=User%20cancelled"),
             None

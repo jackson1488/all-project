@@ -1,0 +1,15 @@
+{
+  "code": 0,
+  "profile": {
+    "id": 42,
+    "login": "neko",
+    "avatar": "https://cdn.example/a.png"
+  },
+  "profileToken": {
+    "id": 7,
+    "token": "tok_social"
+  },
+  "hash": "",
+  "codeTimestampExpires": 0,
+  "suggestedLogins": []
+}

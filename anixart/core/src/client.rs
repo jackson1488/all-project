@@ -8,8 +8,9 @@ use crate::error::{AnixartError, Result};
 use crate::models::{
     CodeResponse, CollectionResponse, EpisodeResponse, FeedItem, Pageable, ProfileInfoResponse,
     ProfileResponse, Release, ReleaseResponse, ReleaseSearchResponse, SearchRequest, SignInResponse,
-    SourcesResponse, TypesResponse,
+    SocialSignInResponse, SourcesResponse, TypesResponse,
 };
+use crate::oauth::{self, SocialProvider, TelegramPkce};
 use crate::API_BASE_URL;
 
 const DEFAULT_UA: &str =
@@ -121,20 +122,32 @@ impl AnixartClient {
     }
 
     async fn post_form<T: DeserializeOwned>(&self, path: &str, form: &[(&str, &str)]) -> Result<T> {
+        self.post_form_with_headers(path, form, &[]).await
+    }
+
+    /// Same as [`Self::post_form`] but with extra headers (e.g. `X-Long-Code: 1`,
+    /// which turns a social `auth/*` call into a registration server-side).
+    async fn post_form_with_headers<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        form: &[(&str, &str)],
+        headers: &[(&str, &str)],
+    ) -> Result<T> {
         let url = self.url(path);
         let encoded: String = form
             .iter()
-            .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+            .map(|(k, v)| format!("{k}={}", urlencoding::encode(v)))
             .collect::<Vec<_>>()
             .join("&");
-        let resp = self
+        let mut req = self
             .http
             .post(url)
             .header("Content-Type", "application/x-www-form-urlencoded")
-            .body(encoded)
-            .send()
-            .await?
-            .error_for_status()?;
+            .body(encoded);
+        for (k, v) in headers {
+            req = req.header(*k, *v);
+        }
+        let resp = req.send().await?.error_for_status()?;
         let text = resp.text().await?;
         Ok(serde_json::from_str(&text)?)
     }
@@ -148,6 +161,230 @@ impl AnixartClient {
             self.set_token(token.to_string());
         }
         Ok(resp)
+    }
+
+    /// Shared implementation of `POST /auth/{telegram,vk,google,yandex}`.
+    ///
+    /// The session token is stored automatically when the backend answers
+    /// `code == 0`; any other code (`3 = NOT_REGISTERED`, `6 = LOGIN_ALREADY_TAKEN`, …)
+    /// is surfaced through the response so the caller can continue with
+    /// [`Self::sign_up_telegram`] or the e-mail code flow.
+    async fn social_sign_in(
+        &mut self,
+        provider: SocialProvider,
+        credential: &str,
+    ) -> Result<SocialSignInResponse> {
+        let form = oauth::sign_in_form(provider, credential);
+        let refs: Vec<(&str, &str)> = form
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        let resp: SocialSignInResponse = self.post_form(provider.endpoint(), &refs).await?;
+        if let Some(token) = resp.token() {
+            self.set_token(token.to_string());
+        }
+        Ok(resp)
+    }
+
+    /// Shared implementation of the registration variants, which differ only by
+    /// the `X-Long-Code: 1` header and the extra `login` / `email` fields.
+    async fn social_sign_up(
+        &mut self,
+        provider: SocialProvider,
+        login: &str,
+        email: &str,
+        credential: &str,
+    ) -> Result<SocialSignInResponse> {
+        let form = oauth::sign_up_form(provider, login, email, credential);
+        let refs: Vec<(&str, &str)> = form
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        let resp: SocialSignInResponse = self
+            .post_form_with_headers(provider.endpoint(), &refs, &[oauth::LONG_CODE_HEADER])
+            .await?;
+        if let Some(token) = resp.token() {
+            self.set_token(token.to_string());
+        }
+        Ok(resp)
+    }
+
+    /// `POST /auth/telegram` with the `id_token` produced by the Telegram
+    /// Login-Widget PKCE flow (see [`Self::exchange_telegram_code`]).
+    pub async fn sign_in_telegram(
+        &mut self,
+        telegram_id_token: &str,
+    ) -> Result<SocialSignInResponse> {
+        self.social_sign_in(SocialProvider::Telegram, telegram_id_token)
+            .await
+    }
+
+    /// `POST /auth/vk` with a VK ID access token (scope `email`).
+    pub async fn sign_in_vk(&mut self, vk_access_token: &str) -> Result<SocialSignInResponse> {
+        self.social_sign_in(SocialProvider::Vk, vk_access_token).await
+    }
+
+    /// `POST /auth/google` with a **Firebase** ID token (the Android client
+    /// exchanges the Google `idToken` in Firebase first — see `oauth::google_id_token_hint`).
+    pub async fn sign_in_google(
+        &mut self,
+        google_id_token: &str,
+    ) -> Result<SocialSignInResponse> {
+        self.social_sign_in(SocialProvider::Google, google_id_token)
+            .await
+    }
+
+    /// `POST /auth/yandex` with a Yandex ID OAuth access token (implicit flow).
+    pub async fn sign_in_yandex(
+        &mut self,
+        yandex_access_token: &str,
+    ) -> Result<SocialSignInResponse> {
+        self.social_sign_in(SocialProvider::Yandex, yandex_access_token)
+            .await
+    }
+
+    /// `POST /auth/telegram` + `X-Long-Code: 1` (register a new profile).
+    pub async fn sign_up_telegram(
+        &mut self,
+        login: &str,
+        email: &str,
+        telegram_id_token: &str,
+    ) -> Result<SocialSignInResponse> {
+        self.social_sign_up(SocialProvider::Telegram, login, email, telegram_id_token)
+            .await
+    }
+
+    /// `POST /auth/vk` + `X-Long-Code: 1`.
+    pub async fn sign_up_vk(
+        &mut self,
+        login: &str,
+        email: &str,
+        vk_access_token: &str,
+    ) -> Result<SocialSignInResponse> {
+        self.social_sign_up(SocialProvider::Vk, login, email, vk_access_token)
+            .await
+    }
+
+    /// `POST /auth/google` + `X-Long-Code: 1`.
+    pub async fn sign_up_google(
+        &mut self,
+        login: &str,
+        email: &str,
+        google_id_token: &str,
+    ) -> Result<SocialSignInResponse> {
+        self.social_sign_up(SocialProvider::Google, login, email, google_id_token)
+            .await
+    }
+
+    /// `POST /auth/yandex` + `X-Long-Code: 1`.
+    pub async fn sign_up_yandex(
+        &mut self,
+        login: &str,
+        email: &str,
+        yandex_access_token: &str,
+    ) -> Result<SocialSignInResponse> {
+        self.social_sign_up(SocialProvider::Yandex, login, email, yandex_access_token)
+            .await
+    }
+
+    /// Exchanges a Telegram OAuth `code` for an `id_token`
+    /// (`POST https://oauth.telegram.org/token`).
+    ///
+    /// `code_verifier` must be the one whose SHA-256 was sent as
+    /// `code_challenge` (see [`oauth::generate_pkce`]).
+    pub async fn exchange_telegram_code(
+        &self,
+        code: &str,
+        code_verifier: &str,
+    ) -> Result<String> {
+        self.exchange_telegram_code_at(oauth::TELEGRAM_TOKEN_URL, code, code_verifier)
+            .await
+    }
+
+    /// [`Self::exchange_telegram_code`] against an explicit endpoint
+    /// (unit tests, or a self-hosted Telegram OAuth proxy).
+    pub async fn exchange_telegram_code_at(
+        &self,
+        url: &str,
+        code: &str,
+        code_verifier: &str,
+    ) -> Result<String> {
+        let body = oauth::telegram_token_body(
+            oauth::TELEGRAM_CLIENT_ID,
+            code,
+            oauth::TELEGRAM_REDIRECT_URI,
+            code_verifier,
+        );
+        let resp = self
+            .http
+            .post(url)
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .header("Accept", "application/json")
+            .body(body)
+            .send()
+            .await?;
+        let status = resp.status();
+        let text = resp.text().await?;
+        if !status.is_success() {
+            return Err(AnixartError::OAuth(format!(
+                "HTTP {}: {text}",
+                status.as_u16()
+            )));
+        }
+        oauth::extract_telegram_id_token(&text)
+            .ok_or_else(|| AnixartError::OAuth("No id_token in response".into()))
+    }
+
+    /// Asks Telegram for a URL that continues the login inside the native app
+    /// (`GET https://oauth.telegram.org/crossapp?...`). `None` means the caller
+    /// must fall back to the WebView authorize URL.
+    pub async fn fetch_telegram_inapp_url(&self, pkce: &TelegramPkce) -> Result<Option<String>> {
+        self.fetch_telegram_inapp_url_at(&oauth::telegram_crossapp_url_with(pkce))
+            .await
+    }
+
+    /// [`Self::fetch_telegram_inapp_url`] against an explicit endpoint.
+    pub async fn fetch_telegram_inapp_url_at(&self, url: &str) -> Result<Option<String>> {
+        let resp = self
+            .http
+            .get(url)
+            .header("Accept", "application/json")
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            return Ok(None);
+        }
+        let text = resp.text().await?;
+        Ok(oauth::extract_telegram_inapp_url(&text))
+    }
+
+    /// Full Telegram sign-in from a redirect URI: parse `code` / `error`,
+    /// exchange the code for an `id_token`, then `POST /auth/telegram`.
+    pub async fn sign_in_telegram_redirect(
+        &mut self,
+        redirect_url: &str,
+        code_verifier: &str,
+    ) -> Result<SocialSignInResponse> {
+        self.sign_in_telegram_redirect_at(oauth::TELEGRAM_TOKEN_URL, redirect_url, code_verifier)
+            .await
+    }
+
+    /// [`Self::sign_in_telegram_redirect`] against an explicit token endpoint.
+    pub async fn sign_in_telegram_redirect_at(
+        &mut self,
+        token_url: &str,
+        redirect_url: &str,
+        code_verifier: &str,
+    ) -> Result<SocialSignInResponse> {
+        match oauth::parse_telegram_redirect(redirect_url) {
+            oauth::TelegramRedirect::Error(message) => Err(AnixartError::OAuth(message)),
+            oauth::TelegramRedirect::Code(code) => {
+                let id_token = self
+                    .exchange_telegram_code_at(token_url, &code, code_verifier)
+                    .await?;
+                self.sign_in_telegram(&id_token).await
+            }
+        }
     }
 
     /// `POST /search/releases/{page}`.

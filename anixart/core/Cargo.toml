@@ -10,6 +10,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "1"
 urlencoding = "2"
+# Social OAuth (Telegram PKCE): SHA-256 code challenge + OS RNG for the verifier.
+sha2 = "0.10"
+getrandom = "0.2"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

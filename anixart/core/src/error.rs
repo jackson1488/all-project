@@ -15,6 +15,9 @@ pub enum AnixartError {
     #[error("missing auth token")]
     MissingToken,
 
+    #[error("social OAuth error: {0}")]
+    OAuth(String),
+
     #[error("unexpected response: {0}")]
     Unexpected(String),
 }

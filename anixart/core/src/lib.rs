@@ -3,10 +3,12 @@
 pub mod client;
 pub mod error;
 pub mod models;
+pub mod oauth;
 
 pub use client::AnixartClient;
 pub use error::{AnixartError, Result};
 pub use models::*;
+pub use oauth::SocialProvider;
 
 /// Reverse-engineered Anixart API base URL.
 pub const API_BASE_URL: &str = "https://api-s.anixsekai.com/";

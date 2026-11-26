@@ -8,7 +8,7 @@ pub mod feed;
 pub mod profile;
 pub mod release;
 
-pub use auth::{CheckLoginResponse, ProfileToken, SignInResponse};
+pub use auth::{CheckLoginResponse, ProfileToken, SignInResponse, SocialSignInResponse};
 pub use collection::{Collection, CollectionResponse};
 pub use common::{codes, CodeResponse, Pageable};
 pub use episode::{

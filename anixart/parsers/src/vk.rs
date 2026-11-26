@@ -25,7 +25,7 @@ pub fn generate_device_id() -> String {
     let p2 = ((nanos >> 32) as u16) ^ (count as u16);
     let p3 = 0x4000 | (((nanos >> 48) as u16) & 0x0FFF);
     let p4 = 0x8000 | (((count >> 16) as u16) & 0x3FFF);
-    let p5 = (nanos.wrapping_mul(6364136223846793005).wrapping_add(count)) & 0x0000FFFFFFFFFFFF;
+    let p5 = (nanos.wrapping_mul(6364136223846793005).wrapping_add(count as u128)) & 0x0000FFFFFFFFFFFF;
 
     format!("{p1:08X}-{p2:04X}-{p3:04X}-{p4:04X}-{p5:012X}")
 }

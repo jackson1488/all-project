@@ -280,11 +280,11 @@ impl Browse {
         body
     }
 
-    pub fn view<'a>(&'a self, cache: &'a PosterCache) -> Element<'a, Message> {
+    pub fn view<'a>(&'a self, cache: &'a PosterCache, zone_width: f32) -> Element<'a, Message> {
         let more = self.can_load_more() && !self.releases.is_empty();
 
-        widgets::sticky_body(self.header(), more, move |size| {
-            self.shelf(cache, widgets::grid_columns_for(size.width))
+        widgets::sticky_body(self.header(), zone_width, more, move |width| {
+            self.shelf(cache, widgets::grid_columns_for(width))
         })
     }
 }
@@ -292,6 +292,9 @@ impl Browse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Ширина зоны тела экрана в тестах: окно 1280 px минус навигационная панель.
+    const ZONE_WIDTH: f32 = 1070.0;
 
     fn release(id: i64) -> Release {
         Release {
@@ -537,26 +540,26 @@ mod tests {
                 ..Default::default()
             };
             browse.paging.loading = true;
-            let _ = browse.view(&cache);
+            let _ = browse.view(&cache, ZONE_WIDTH);
 
             browse.paging.loading = false;
-            let _ = browse.view(&cache);
+            let _ = browse.view(&cache, ZONE_WIDTH);
 
             browse.begin();
             browse.apply(match tab {
                 BrowseTab::Search => BrowsePage::Search(search(&[1, 2, 3])),
                 _ => BrowsePage::Shelf(shelf(&[1, 2, 3, 4, 5, 6])),
             });
-            let _ = browse.view(&cache);
+            let _ = browse.view(&cache, ZONE_WIDTH);
 
             if browse.can_load_more() {
                 browse.begin_more();
-                let _ = browse.view(&cache);
+                let _ = browse.view(&cache, ZONE_WIDTH);
                 browse.apply(BrowsePage::Shelf(shelf(&[])));
             } else {
                 browse.apply(BrowsePage::Shelf(shelf(&[])));
             }
-            let _ = browse.view(&cache);
+            let _ = browse.view(&cache, ZONE_WIDTH);
         }
     }
 }

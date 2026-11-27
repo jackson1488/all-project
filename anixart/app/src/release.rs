@@ -26,8 +26,17 @@
 //!
 //! Экран источников построен [`widgets::sticky_body`]: шапка с возвратом к
 //! озвучкам, пилюлями видеохостингов и переключателем «Сначала 1-я / Сначала
-//! новая» прикреплена к верху зоны, а под ней — [`iced::widget::responsive`] тело,
-//! которое знает свою ширину и поэтому отдаёт ряды серий во всю его длину.
+//! новая» прикреплена к верху зоны, а под ней — тело, которому [`crate::app`]
+//! передаёт измеренную ширину окна, поэтому ряды серий идут во всю его длину.
+//!
+//! Спуск вперёд идёт через кэш: [`ReleaseView::sources_by_type`] хранит источники
+//! каждой уже виденной озвучки, [`ReleaseView::episodes_by_source`] — серии каждой
+//! уже виденной пары «озвучка + источник». [`crate::app::App::route` наполняет их
+//! и опережающими запросами — как только пришла озвучка, у неё спрашиваются
+//! источники первого варианта, а как только пришли источники, серии первого из них
+//! решаются вперёд. Повторный визит назад не отправляет к серверу ни одного
+//! запроса, и список серий лежит на экране к моменту, когда экран успевает
+//! отрисоваться.
 //!
 //! Ответы сервера о смене статуса и избранного отражаются локально
 //! ([`ReleaseView::apply_status`] / [`ReleaseView::apply_favorite`]) и проверяются
@@ -35,12 +44,15 @@
 //! нынешнего.
 
 use anixart_core::{Episode, EpisodeType, Release, Source};
-use iced::widget::{button, horizontal_space, text, Column, Row};
+use iced::widget::{button, container, horizontal_space, text, Column, Row};
 use iced::{alignment, Element, Length};
+
+use std::collections::HashMap;
 
 use crate::app::Message;
 use crate::lists::{ReleaseStatus, VariantFilter, WatchStatus};
 use crate::posters::{self, PosterCache};
+use crate::theme;
 use crate::util;
 use crate::widgets;
 
@@ -106,6 +118,15 @@ pub struct ReleaseView {
     pub selected_source: Option<usize>,
     pub episodes: Vec<Episode>,
     pub loading_episodes: bool,
+    /// Источники каждой уже виденной озвучки, ключ — её `id`.
+    ///
+    /// Спуск «озвучка → источник → серия» проходится по несколько раз: пользователь
+    /// сравнивает варианты и возвращается назад. Второй визит на ту же озвучку
+    /// обязан открыться мгновенно, без единого запроса, поэтому ответ хранится всё
+    /// время, пока открыт релиз ([`ReleaseView::reset`] стирает кэш вместе со спуском).
+    pub sources_by_type: HashMap<i64, Vec<Source>>,
+    /// Серии каждой уже виденной пары «озвучка + источник», ключ — их id.
+    pub episodes_by_source: HashMap<(i64, i64), Vec<Episode>>,
     /// Направление сортировки списка серий, выбранное пилюлей в шапке источников.
     pub episode_order: EpisodeOrder,
     pub pending: Option<usize>,
@@ -174,6 +195,58 @@ impl ReleaseView {
     /// Серия, выбранная для воспроизведения.
     pub fn episode(&self, index: usize) -> Option<&Episode> {
         self.episodes.get(index)
+    }
+
+    /// Кладёт источники озвучки в кэш и делает их текущим списком.
+    pub fn remember_sources(&mut self, type_id: i64, sources: Vec<Source>) {
+        self.sources_by_type.insert(type_id, sources.clone());
+        self.sources = sources;
+        self.loading_sources = false;
+    }
+
+    /// Текущие источники — из кэша, если эта озвучка уже открывалась.
+    ///
+    /// `true` значит «список готов, просить сервер не нужно» — именно так экран
+    /// источников открывается со второго визита на ту же озвучку.
+    pub fn cached_sources(&mut self, type_id: i64) -> bool {
+        let Some(sources) = self.sources_by_type.get(&type_id).cloned() else {
+            return false;
+        };
+        self.sources = sources;
+        self.loading_sources = false;
+        true
+    }
+
+    /// Кладёт серии пары «озвучка + источник» в кэш и делает их текущим списком.
+    pub fn remember_episodes(&mut self, key: (i64, i64), episodes: Vec<Episode>) {
+        self.episodes_by_source.insert(key, episodes.clone());
+        self.episodes = episodes;
+        self.loading_episodes = false;
+    }
+
+    /// Текущие серии — из кэша, если этот источник уже открывался.
+    pub fn cached_episodes(&mut self, key: (i64, i64)) -> bool {
+        let Some(episodes) = self.episodes_by_source.get(&key).cloned() else {
+            return false;
+        };
+        self.episodes = episodes;
+        self.loading_episodes = false;
+        true
+    }
+
+    /// id первого источника выбранной озвучки — его серии догружаются заранее.
+    pub fn first_source_id(&self) -> Option<i64> {
+        self.sources.first().map(|source| source.id)
+    }
+
+    /// Уже ли лежат в кэше серии пары «озвучка + источник».
+    pub fn has_cached_episodes(&self, key: (i64, i64)) -> bool {
+        self.episodes_by_source.contains_key(&key)
+    }
+
+    /// Уже ли лежат в кэше источники озвучки.
+    pub fn has_cached_sources(&self, type_id: i64) -> bool {
+        self.sources_by_type.contains_key(&type_id)
     }
 
     /// Номер серии, по которому строится сортировка: настоящее `position` ответа
@@ -257,13 +330,16 @@ impl ReleaseView {
     ///
     /// Порядок серий (`episode_order`) намеренно переживает сброс: это привычка
     /// просмотра, а не часть спуска по озвучке — её пилюля стоит в шапке источника
-    /// и должна оставаться выбранной, пока пользователь листает релизы.
+    /// и должна оставаться выбранной, пока пользователь листает релизы. Кэши
+    /// источников и серий стираются: их id принадлежат прошлому релизу.
     pub fn reset(&mut self) {
         self.types.clear();
         self.selected_type = None;
         self.sources.clear();
         self.selected_source = None;
         self.episodes.clear();
+        self.sources_by_type.clear();
+        self.episodes_by_source.clear();
         self.playing = None;
         self.pending = None;
         self.saving = false;
@@ -392,10 +468,16 @@ impl ReleaseView {
     /// источников и пилюля-переключатель порядка серий — прикреплена к верху зоны
     /// и в прокрутку не уходит: серий у длинного тайтла бывают сотни, и ни возврат,
     /// ни выбор видеохостинга, ни «Сначала 1-я / Сначала новая» не должны уезжать
-    /// вместе с ними. Тело под шапкой отмеряется [`iced::widget::responsive`],
-    /// поэтому ряды серий идут во всю ширину окна.
-    pub fn sources_view<'a>(&'a self, _cache: &'a PosterCache) -> Element<'a, Message> {
-        widgets::sticky_body(self.sources_header(), false, move |_| self.sources_body())
+    /// вместе с ними. Ширина тела приходит извне ([`crate::app::App::body_width`]),
+    /// поэтому ряды серий идут во всю ширину окна, а прокрутка строится один раз и
+    /// не сбрасывает смещение при каждом перерисовывании.
+    pub fn sources_view<'a>(&'a self, zone_width: f32) -> Element<'a, Message> {
+        widgets::sticky_body(
+            self.sources_header(),
+            zone_width,
+            false,
+            move |_| self.sources_body(),
+        )
     }
 
     /// Прикреплённая шапка экрана источников.
@@ -569,7 +651,7 @@ fn meta_chips(release: &Release) -> Vec<String> {
         .map(str::trim)
         .filter(|text| !text.is_empty())
     {
-        chips.push(country.to_owned());
+        push_parts(&mut chips, country, "", PART_CHIPS);
     }
     if let Some(studio) = release
         .studio
@@ -577,7 +659,7 @@ fn meta_chips(release: &Release) -> Vec<String> {
         .map(str::trim)
         .filter(|text| !text.is_empty())
     {
-        chips.push(format!("Студия: {studio}"));
+        push_parts(&mut chips, studio, "Студия: ", PART_CHIPS);
     }
     if let Some(source) = release
         .source
@@ -585,15 +667,18 @@ fn meta_chips(release: &Release) -> Vec<String> {
         .map(str::trim)
         .filter(|text| !text.is_empty())
     {
-        chips.push(format!("Источник: {source}"));
+        push_parts(&mut chips, source, "Источник: ", PART_CHIPS);
     }
+    // Жанры приходят одной строкой через запятую — «драма, приключения, сэйнэн».
+    // Один чип на такую строку и есть тот «высокий чип»: значения режутся на
+    // отдельные, короткие, а излишек сворачивается в «ещё N».
     if let Some(genres) = release
         .genres
         .as_deref()
         .map(str::trim)
         .filter(|text| !text.is_empty())
     {
-        chips.push(genres.to_owned());
+        push_parts(&mut chips, genres, "", GENRE_CHIPS);
     }
     if release.age_rating > 0 {
         chips.push(format!("{}+", release.age_rating));
@@ -637,9 +722,51 @@ fn meta_chips(release: &Release) -> Vec<String> {
         .map(str::trim)
         .filter(|text| !text.is_empty())
     {
-        chips.push(format!("Перевод: {translators}"));
+        push_parts(&mut chips, translators, "Перевод: ", PART_CHIPS);
     }
     chips
+}
+
+/// Сколько отдельных чипов делает одно поле, в котором backend перечислил несколько
+/// значений через запятую.
+pub const PART_CHIPS: usize = 4;
+
+/// Жанров показывается не больше этих шести: остальное — одним чипом «ещё N».
+pub const GENRE_CHIPS: usize = 6;
+
+/// Разбивает перечисление, которое backend прислал одной строкой, на отдельные
+/// значения: «драма, приключения, сэйнэн» → три коротких чипа вместо одного
+/// длинного. Разделители — запятая и точка с запятой; пустые куски отбрасываются,
+/// повторы схлопываются, порядок остаётся серверным.
+pub fn split_parts(raw: &str) -> Vec<String> {
+    let mut parts: Vec<String> = Vec::new();
+    for piece in raw.split([',', ';']) {
+        let piece = piece.trim();
+        if piece.is_empty() {
+            continue;
+        }
+        if !parts.iter().any(|kept| kept == piece) {
+            parts.push(piece.to_owned());
+        }
+    }
+    parts
+}
+
+/// Добавляет чипы одного перечисления: первые `limit` значений с префиксом и, если
+/// осталось, чип «ещё N» — так карточка не расползается на двадцать жанров.
+fn push_parts(chips: &mut Vec<String>, raw: &str, prefix: &str, limit: usize) {
+    let parts = split_parts(raw);
+    for part in parts.iter().take(limit) {
+        chips.push(if prefix.is_empty() {
+            part.clone()
+        } else {
+            format!("{prefix}{part}")
+        });
+    }
+    let spare = parts.len().saturating_sub(limit);
+    if spare > 0 {
+        chips.push(format!("ещё {spare}"));
+    }
 }
 
 /// Кнопка избранного и пилюли списков профиля, либо подсказка для гостя.
@@ -823,9 +950,8 @@ fn episodes(view: &ReleaseView) -> Element<'_, Message> {
     }
 
     let waiting = view.pending.is_some();
-    let mut rows = Column::new().spacing(10);
+    let mut rows = Column::new().spacing(6);
     for index in view.ordered_episodes() {
-        let episode = &view.episodes[index];
         let action = if view.pending == Some(index) {
             "Решаю ссылку…"
         } else if view.playing == Some(index) {
@@ -834,16 +960,88 @@ fn episodes(view: &ReleaseView) -> Element<'_, Message> {
             "Смотреть"
         };
 
-        rows = rows.push(entry(
-            episode_title(episode, index),
-            episode_marks(episode),
+        rows = rows.push(episode_row(
+            &view.episodes[index],
+            index,
+            view.playing == Some(index),
             action,
-            view.playing == Some(index) || view.pending == Some(index),
             (!waiting).then_some(Message::PlayEpisode(index)),
         ));
     }
 
     widgets::section(caption, rows)
+}
+
+/// Ширина заголовка ряда в символах: длинное имя серии обрезается многоточием,
+/// и ряд не вырастает во вторую строку.
+pub const EPISODE_TITLE_CHARS: usize = 48;
+
+/// Компактный ряд серии — **одной строкой**: номер с именем слева, отметки чипом и
+/// пилюля действия справа.
+///
+/// Строится здесь один раз, потому что список серий одинаков на экране источников и
+/// во встроенном плеере ([`crate::player`]). Прежде ряд собирался из [`entry`] —
+/// заголовок и мета-строка друг под другом, две строки высоты на серию, поэтому
+/// сотня серий листалась экранами вместо одного списка.
+///
+/// `current` подсвечивает играемую серию: ряд получает выбранную карточку, а
+/// пилюля — состояние «Играет». `action` — `&'static str`, потому что все три
+/// подписи («Смотреть», «Играет», «Решаю ссылку…») известны из кода.
+pub fn episode_row<'a>(
+    episode: &Episode,
+    index: usize,
+    current: bool,
+    action: &'static str,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    let style: fn(&iced::Theme, button::Status) -> button::Style = if current {
+        theme::styles::pill_active
+    } else {
+        theme::styles::pill
+    };
+
+    let marks = episode_marks(episode);
+    let mut row = Row::new()
+        .spacing(12)
+        .align_y(alignment::Vertical::Center)
+        .push(widgets::one_line(
+            ellipsize(&episode_title(episode, index), EPISODE_TITLE_CHARS),
+            14,
+            theme::TEXT,
+        ));
+
+    if !marks.is_empty() {
+        row = row.push(widgets::chip(marks));
+    }
+
+    container(row.push(
+        button(widgets::button_label(action, 14).wrapping(text::Wrapping::None))
+            .padding([8, 16])
+            .style(style)
+            .on_press_maybe(on_press),
+    ))
+    .padding([8, 14])
+    .width(Length::Fill)
+    .style(if current {
+        theme::styles::card_selected
+    } else {
+        theme::styles::card
+    })
+    .into()
+}
+
+/// Заголовок, обрезанный многоточием до `limit` символов.
+///
+/// iced 0.13 не режет текст с «…»: строка либо переносится, либо переполняет
+/// соседа. Список серий растёт переносом, поэтому обрезается здесь, по символам,
+/// а не по байтам — русские имена серий в многобайтовых буквах.
+pub fn ellipsize(caption: &str, limit: usize) -> String {
+    let trimmed = caption.trim();
+    if trimmed.chars().count() <= limit {
+        return trimmed.to_owned();
+    }
+    let keep = trimmed.chars().take(limit.saturating_sub(1)).collect::<String>();
+    format!("{}…", keep.trim_end())
 }
 
 /// Заголовок ряда: номер серии и её имя, когда backend потрудился его прислать.
@@ -888,7 +1086,10 @@ fn episode_marks(episode: &Episode) -> String {
 }
 
 /// Подпись серии целиком — заголовок ряда плюс её отметки, тем же порядком.
-fn episode_caption(episode: &Episode, index: usize) -> String {
+///
+/// Публичная, потому что ею живут и заголовок окна `mpv`, и ряд списка серий во
+/// встроенном плеере ([`crate::player`]).
+pub fn episode_caption(episode: &Episode, index: usize) -> String {
     widgets::join_meta(vec![
         episode_title(episode, index),
         episode_marks(episode),
@@ -940,6 +1141,10 @@ fn entry<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Ширина зоны тела экрана, с которой в тестах собираются списки: окно 1280 px
+    /// минус навигационная панель — ровно то, что даёт [`crate::app::App::body_width`].
+    const ZONE_WIDTH: f32 = 1070.0;
 
     fn release(status: i32, favorite: bool) -> Release {
         Release {
@@ -1307,7 +1512,6 @@ mod tests {
 
     #[test]
     fn the_sources_screen_builds_headlessly_with_a_pinned_header_and_both_orders() {
-        let cache = PosterCache::new();
         let mut view = ReleaseView {
             release: Some(release(1, false)),
             types: vec![EpisodeType {
@@ -1343,24 +1547,24 @@ mod tests {
         };
 
         {
-            let _first = view.sources_view(&cache);
+            let _first = view.sources_view(ZONE_WIDTH);
         }
         view.toggle_episode_order();
         {
-            let _newest = view.sources_view(&cache);
+            let _newest = view.sources_view(ZONE_WIDTH);
         }
 
         // источник снят: пилюли в шапке остаются, тело пересказывает список хостов
         view.selected_source = None;
         {
-            let _hosting_only = view.sources_view(&cache);
+            let _hosting_only = view.sources_view(ZONE_WIDTH);
         }
 
         // серия в полёте: ряды собираются и не нажимаются
         view.selected_source = Some(0);
         view.pending = Some(1);
         {
-            let _resolving = view.sources_view(&cache);
+            let _resolving = view.sources_view(ZONE_WIDTH);
         }
 
         // озвучек вовсе нет: шапка жива, тело — одна подсказка
@@ -1368,7 +1572,7 @@ mod tests {
         view.sources.clear();
         view.selected_type = None;
         {
-            let _nothing = view.sources_view(&cache);
+            let _nothing = view.sources_view(ZONE_WIDTH);
         }
     }
 
@@ -1411,7 +1615,7 @@ mod tests {
         {
             let stage = ReleaseView::default();
             let _empty = stage.view(&cache);
-            let _sources = stage.sources_view(&cache);
+            let _sources = stage.sources_view(ZONE_WIDTH);
         }
 
         {
@@ -1421,7 +1625,7 @@ mod tests {
                 ..Default::default()
             };
             let _busy = loading.view(&cache);
-            let _busy_sources = loading.sources_view(&cache);
+            let _busy_sources = loading.sources_view(ZONE_WIDTH);
         }
 
         let mut view = ReleaseView {
@@ -1463,7 +1667,7 @@ mod tests {
         };
         {
             let _page = view.view(&cache);
-            let _sources = view.sources_view(&cache);
+            let _sources = view.sources_view(ZONE_WIDTH);
         }
 
         // ряд «Выберите вариант» раскрыт и сужает список до субтитров
@@ -1471,7 +1675,7 @@ mod tests {
         view.selected_type = Some(1);
         {
             let _choosing = view.view(&cache);
-            let _subtitles = view.sources_view(&cache);
+            let _subtitles = view.sources_view(ZONE_WIDTH);
         }
 
         // под фильтр не попала ни одна запись
@@ -1493,7 +1697,7 @@ mod tests {
         view.selected_type = None;
         view.sources.clear();
         {
-            let _no_voiceovers = view.sources_view(&cache);
+            let _no_voiceovers = view.sources_view(ZONE_WIDTH);
         }
 
         // гость видит подсказку вместо кнопок списков
@@ -1501,6 +1705,145 @@ mod tests {
         {
             let _guest = view.view(&cache);
         }
+    }
+
+    #[test]
+    fn genres_arrive_as_one_line_and_leave_as_separate_chips() {
+        // Та самая «высокая пилюля»: backend прислал девять жанров одной строкой.
+        let view = Release {
+            genres: Some(
+                "драма, приключения, сэйнэн, сверхъестественное, психология, \
+                 триллер, школа, детектив, фантастика"
+                    .to_owned(),
+            ),
+            studio: Some("Pierrot, Studio Deen".to_owned()),
+            translators: Some("AniLibria, Anidub".to_owned()),
+            ..Default::default()
+        };
+        let chips = meta_chips(&view);
+
+        assert!(chips.contains(&"драма".to_owned()), "{chips:?}");
+        assert!(chips.contains(&"приключения".to_owned()), "{chips:?}");
+        assert!(chips.contains(&"сэйнэн".to_owned()), "{chips:?}");
+        assert!(
+            !chips.iter().any(|chip| chip.contains(',')),
+            "ни один чип не носит сразу несколько жанров: {chips:?}"
+        );
+        assert!(chips.contains(&"ещё 3".to_owned()), "{chips:?}");
+        assert_eq!(
+            chips.iter().filter(|chip| chip.starts_with("Студия: ")).count(),
+            2,
+            "перечисление студий тоже режется: {chips:?}"
+        );
+        assert!(chips.contains(&"Студия: Pierrot".to_owned()));
+        assert!(chips.contains(&"Перевод: AniLibria".to_owned()));
+
+        // пустое поле и поле из одних запятых не рождают чип-пустышку
+        for blank in [None, Some(String::new()), Some("  , , ".to_owned())] {
+            let chips = meta_chips(&Release {
+                genres: blank.clone(),
+                ..Default::default()
+            });
+            assert!(!chips.iter().any(|chip| chip.trim().is_empty()), "{chips:?}");
+        }
+
+        assert_eq!(split_parts("а, б;; в, а"), vec!["а", "б", "в"]);
+        assert!(split_parts("   ").is_empty());
+    }
+
+    #[test]
+    fn the_cache_answers_the_second_visit_without_a_request() {
+        let dub = Source {
+            id: 77,
+            name: "Kodik".to_owned(),
+            ..Default::default()
+        };
+        let sub = Source {
+            id: 78,
+            name: "Sibnet".to_owned(),
+            ..Default::default()
+        };
+        let first = Episode {
+            id: 1,
+            position: 1,
+            ..Default::default()
+        };
+
+        let mut view = ReleaseView {
+            loading_sources: true,
+            ..Default::default()
+        };
+        // первый визит: ответ сервера ложится в кэш и становится текущим списком
+        view.remember_sources(5, vec![dub.clone(), sub.clone()]);
+        assert_eq!(view.sources.len(), 2);
+        assert!(!view.loading_sources);
+        assert_eq!(view.first_source_id(), Some(77));
+        assert!(view.has_cached_sources(5));
+        assert!(!view.has_cached_sources(6));
+
+        view.remember_episodes((5, 77), vec![first.clone()]);
+        assert_eq!(view.episodes.len(), 1);
+        assert!(!view.loading_episodes);
+        assert!(view.has_cached_episodes((5, 77)));
+        assert!(!view.has_cached_episodes((5, 78)));
+
+        // уход назад к озвучкам сворачивает список, но не память
+        view.selected_type = Some(0);
+        view.selected_source = Some(0);
+        assert_eq!(view.back(true), Back::Sources);
+        assert!(view.episodes.is_empty());
+        assert!(view.cached_episodes((5, 77)), "серии берутся из кэша");
+        assert_eq!(view.episodes.len(), 1);
+
+        assert_eq!(view.back(true), Back::Voiceovers);
+        assert!(view.sources.is_empty());
+        assert!(view.cached_sources(5), "источники берутся из кэша");
+        assert_eq!(view.sources.len(), 2);
+
+        // чужой кэш не подменяет список: запрос на неизвестную пару честно делается
+        assert!(!view.cached_sources(9));
+        assert!(!view.cached_episodes((9, 99)));
+
+        // другой релиз — другая память: id источников и серий к нему не относятся
+        view.reset();
+        assert!(!view.has_cached_sources(5));
+        assert!(!view.has_cached_episodes((5, 77)));
+        assert!(view.sources.is_empty() && view.episodes.is_empty());
+    }
+
+    #[test]
+    fn episode_rows_are_one_line_high_and_carry_the_true_index() {
+        let named = Episode {
+            id: 12,
+            position: 12,
+            name: Some("Битва за Коноху, которую ждали весь сезон".to_owned()),
+            quality: 4,
+            is_watched: true,
+            url: "https://kodik.example/12".to_owned(),
+            ..Default::default()
+        };
+        let anonymous = Episode {
+            id: 13,
+            ..Default::default()
+        };
+
+        // заголовок ряда обрезается, а не переносится: высота одна строка
+        let title = ellipsize(&episode_title(&named, 0), EPISODE_TITLE_CHARS);
+        assert!(title.ends_with('…'), "{title}");
+        assert!(
+            title.chars().count() <= EPISODE_TITLE_CHARS,
+            "обрезанный заголовок не длиннее ряда: {title}"
+        );
+        assert_eq!(ellipsize("  №1  ", 48), "№1");
+        assert_eq!(ellipsize("", 48), "");
+
+        let _plain = episode_row(&named, 0, false, "Смотреть", Some(Message::PlayEpisode(0)));
+        let _current = episode_row(&anonymous, 1, true, "Играет", None);
+        let _waiting = episode_row(&anonymous, 1, false, "Решаю ссылку…", None);
+
+        // подпись серии для окна `mpv` не обрезается: там хватает места
+        assert_eq!(episode_caption(&named, 0), "№12 · Битва за Коноху, которую ждали весь сезон · 1080p · Просмотрено");
+        assert_eq!(episode_caption(&anonymous, 1), "№2");
     }
 
     #[test]

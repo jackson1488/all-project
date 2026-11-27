@@ -163,11 +163,11 @@ impl Feed {
         body
     }
 
-    pub fn view<'a>(&'a self, cache: &'a PosterCache) -> Element<'a, Message> {
+    pub fn view<'a>(&'a self, cache: &'a PosterCache, zone_width: f32) -> Element<'a, Message> {
         let more = self.can_load_more() && !self.releases.is_empty();
 
-        widgets::sticky_body(self.header(), more, move |size| {
-            self.shelf(cache, widgets::grid_columns_for(size.width))
+        widgets::sticky_body(self.header(), zone_width, more, move |width| {
+            self.shelf(cache, widgets::grid_columns_for(width))
         })
     }
 }
@@ -175,6 +175,9 @@ impl Feed {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Ширина зоны тела экрана в тестах: окно 1280 px минус навигационная панель.
+    const ZONE_WIDTH: f32 = 1070.0;
 
     fn release(id: i64) -> Release {
         Release {
@@ -326,22 +329,22 @@ mod tests {
         let cache = PosterCache::new();
 
         let empty = Feed::default();
-        let _ = empty.view(&cache);
+        let _ = empty.view(&cache, ZONE_WIDTH);
 
         let mut loading = Feed::default();
         loading.begin();
-        let _ = loading.view(&cache);
+        let _ = loading.view(&cache, ZONE_WIDTH);
 
         let mut feed = Feed::default();
         feed.begin();
         feed.apply(shelf(&(1..=6).collect::<Vec<i64>>()));
-        let _ = feed.view(&cache);
+        let _ = feed.view(&cache, ZONE_WIDTH);
         assert!(feed.can_load_more());
 
         feed.begin_more();
-        let _ = feed.view(&cache);
+        let _ = feed.view(&cache, ZONE_WIDTH);
 
         feed.apply(shelf(&[]));
-        let _ = feed.view(&cache);
+        let _ = feed.view(&cache, ZONE_WIDTH);
     }
 }

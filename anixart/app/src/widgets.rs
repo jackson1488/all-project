@@ -17,12 +17,14 @@
 //! with its `NestedScrollView`. The same helper pins the tab row of a shelf to the
 //! top of the window, so scrolling never carries the pills away.
 //!
-//! A shelf is built inside [`iced::widget::responsive`], which hands the screen the
-//! real size of its zone before the tree is composed. That is what lets
-//! [`poster_grid`] stretch: the number of columns comes from
-//! [`grid_columns_for`] — the measured width minus [`BODY_PADDING_X`] — and every
+//! A shelf is built for a width the app already knows: [`crate::app`] tracks the
+//! size of the window and hands [`sized_body`] the width of its zone. That is what
+//! lets [`poster_grid`] stretch — the number of columns comes from
+//! [`grid_columns_for`], the measured width minus [`BODY_PADDING_X`] — and every
 //! tile takes an equal [`Length::FillPortion`] of the row instead of a card of a
-//! fixed pixel width.
+//! fixed pixel width. The scrollable is built *outside* any measuring widget, so
+//! the offset the user has already scrolled to survives every repaint; [`sized_body`]
+//! explains why that matters.
 //!
 //! Two iced 0.13 constraints shape the code:
 //!
@@ -35,9 +37,9 @@
 //!   style function; the plain texts of a card set theirs explicitly.
 
 use anixart_core::{Collection, EpisodeType, Release};
-use iced::widget::scrollable::Viewport;
-use iced::widget::{button, container, responsive, scrollable, text, Column, Row, Text};
-use iced::{alignment, Element, Length, Size};
+use iced::widget::scrollable::{Id, Viewport};
+use iced::widget::{button, container, scrollable, text, Column, Row, Text};
+use iced::{alignment, Element, Length};
 
 use crate::app::Message;
 use crate::posters::{self, PosterCache};
@@ -230,30 +232,42 @@ pub fn paragraph<'a>(caption: String) -> Element<'a, Message> {
 }
 
 /// A small rounded label — year, studio, genre, quality.
+///
+/// Чип всегда **[одна строка](text::Wrapping::None)** и всегда сжат по содержимому:
+/// [`line`] с её `Length::Fill` и переносом по словам превращала длинную строку
+/// жанров в вертикальную колонку слов высотой в пять строк. Длинное значение
+/// режется до чипов вызывающим кодом ([`crate::release::meta_chips`]), а не здесь.
 pub fn chip<'a>(caption: String) -> Element<'a, Message> {
-    container(muted_centered(caption))
-        .padding([4, 12])
-        .style(theme::styles::chip)
-        .into()
+    container(
+        text(caption)
+            .size(13)
+            .color(theme::TEXT_MUTED)
+            .align_x(alignment::Horizontal::Center)
+            .width(Length::Shrink)
+            .wrapping(text::Wrapping::None),
+    )
+    .padding([4, 12])
+    .style(theme::styles::chip)
+    .into()
 }
 
-/// Chips of a release, laid out one row per line of text.
+/// Chips of a release: one flowing row, so a wide window spreads them sideways
+/// and a narrow one moves the spare to the next line — never inside a chip.
 pub fn chip_row<'a>(captions: Vec<String>) -> Element<'a, Message> {
-    let mut rows = Column::new().spacing(6);
-    let mut line = Row::new().spacing(6);
+    let mut row = Row::new().spacing(6);
     let mut filled = false;
 
     for caption in captions {
         if caption.trim().is_empty() {
             continue;
         }
-        line = line.push(chip(caption));
+        row = row.push(chip(caption));
         filled = true;
     }
-    if filled {
-        rows = rows.push(line);
+    if !filled {
+        return Column::new().into();
     }
-    rows.into()
+    row.wrap().into()
 }
 
 /// Pill button of a tab row — the widget the feed categories, the voiceover
@@ -318,6 +332,18 @@ pub fn headline_row<'a>(caption: String) -> Element<'a, Message> {
         .into()
 }
 
+/// Текст в **одну строку** во всю ширину своей ячейки: перенос запрещён, поэтому
+/// ряд, собранный из такого текста, всегда ровно одной высотой. Длину до многоточия
+/// обрезает вызывающий код ([`crate::release::episode_title`]) — iced не умеет
+/// резать текст с «…», а два ряда на серию в списке из сотни серий не нужны.
+pub fn one_line<'a>(caption: String, size: u16, color: iced::Color) -> Text<'a> {
+    text(caption)
+        .size(size)
+        .color(color)
+        .width(Length::Fill)
+        .wrapping(text::Wrapping::None)
+}
+
 /// A raised card that holds arbitrary content. The content is taken as
 /// `impl Into<Element>` so a caller can hand a bare [`Column`] or [`Row`] — a
 /// `.into()` written at the call site would leave iced guessing which
@@ -347,11 +373,26 @@ pub fn section<'a>(
 /// width, so a grid never promises a column that the rails would eat.
 pub const BODY_PADDING_X: f32 = 40.0;
 
+/// Имя состояния прокрутки простого тела экрана.
+const PLAIN_SCROLL: &str = "anixart-plain-body";
+/// Имя состояния прокрутки полки (прикреплённое тело).
+const SHELF_SCROLL: &str = "anixart-shelf-body";
+
+/// Прокрутка с постоянным именем.
+///
+/// iced 0.13 держит смещение в дереве виджетов по *позиции*, а по [`Id`] —
+/// программные команды (`scroll_to`, `snap_to`). Имя здесь нужно второму: экран
+/// плеера мотает список серий к текущему эпизоду, и сделать это без идентификатора
+/// нельзя. Имя одно на все тела экранов — одновременно видимым бывает только одно.
+fn scroll_id(name: &'static str) -> Id {
+    Id::new(name)
+}
+
 /// The scrollable body of a screen: full width, thin rails.
 ///
-/// A screen that shows a poster grid should prefer [`responsive_body`] instead:
-/// this one lays its content out before anyone knows how wide the window is, so
-/// its grid has to fall back on the [`GRID_COLUMNS`] constant.
+/// A screen that shows a poster grid should prefer [`sized_body`] instead: this one
+/// lays its content out before anyone knows how wide the window is, so its grid has
+/// to fall back on the [`GRID_COLUMNS`] constant.
 pub fn scroll_body<'a>(content: Column<'a, Message>) -> Element<'a, Message> {
     scrollable(
         content
@@ -359,10 +400,37 @@ pub fn scroll_body<'a>(content: Column<'a, Message>) -> Element<'a, Message> {
             .padding([16, 20])
             .width(Length::Fill),
     )
+    .id(scroll_id(PLAIN_SCROLL))
     .width(Length::Fill)
     .height(Length::Fill)
     .style(theme::styles::scroll)
     .into()
+}
+
+/// Тот же [`scroll_body`], но с именем прокрутки, которое экран знает заранее.
+///
+/// Нужно плееру: он оставляет список серий в состоянии «доскроллено до играемой
+/// серии», а это состояние адресуется именно [`Id`].
+pub fn named_scroll_body<'a>(
+    content: Column<'a, Message>,
+    id: Id,
+    on_scroll: Option<fn(Viewport) -> Message>,
+) -> Element<'a, Message> {
+    let mut body = scrollable(
+        content
+            .spacing(14)
+            .padding([16, 20])
+            .width(Length::Fill),
+    )
+    .id(id)
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .style(theme::styles::scroll);
+
+    if let Some(report) = on_scroll {
+        body = body.on_scroll(report);
+    }
+    body.into()
 }
 
 /// Columns of a poster grid inside a body of the measured `width`.
@@ -373,58 +441,65 @@ pub fn grid_columns_for(width: f32) -> usize {
     grid_columns(width - BODY_PADDING_X, GRID_GAP)
 }
 
-/// Scrollable body that is built *after* its zone has been measured.
+/// Scrollable body built for a zone of the known `zone_width`.
 ///
-/// [`responsive`] hands the closure the size of the region the screen actually got
-/// — window minus the navigation rail, minus banners, minus a pinned header — so
-/// the caller can lay out whole rows instead of guessing. The closure is run again
-/// whenever that size changes, which is what makes a shelf re-column itself live
-/// while the window is dragged wider.
+/// Почему не [`iced::widget::responsive`]. Тот виджет пересобирает своё содержимое
+/// каждый раз, когда измеренная зона меняет размер, а вместе с содержимым
+/// пересоздается и [`scrollable`] внутри него: смещение пользователя обнуляется,
+/// layout сбрасывается в `None`, и кадр рисуется с нуля. Именно это видно как
+/// мерцание — прилет обложки меняет высоту ряда, высота меняет измеренную зону,
+/// зона пересобирает прокрутку. Здесь же ширина приходит из
+/// [`crate::app::App::body_width`], которую приложение узнаёт из подписки на события
+/// окна, поэтому [`scrollable`] строится один раз в корне дерева экрана и живёт,
+/// пока открыт этот экран.
 ///
 /// `more` is the endless-shelf switch: while it is `true` the scrollable reports
 /// its offset through [`Message::Scrolled`](crate::app::Message::Scrolled), and
 /// the app compares that offset with [`reached_end`] and asks for the next page.
 /// A shelf that knows it is done switches it off, which is the only cheap way to
 /// stop asking the endpoint for pages it already answered with nothing.
-pub fn responsive_body<'a, F>(more: bool, body: F) -> Element<'a, Message>
+pub fn sized_body<'a, F>(zone_width: f32, more: bool, body: F) -> Element<'a, Message>
 where
-    F: Fn(Size) -> Column<'a, Message> + 'a,
+    F: Fn(f32) -> Column<'a, Message> + 'a,
 {
-    responsive(move |size: Size| {
-        let column = body(size)
-            .spacing(14)
-            .padding([16, 20])
-            .width(Length::Fill);
+    let column = body(zone_width)
+        .spacing(14)
+        .padding([16, 20])
+        .width(Length::Fill);
 
-        let mut shelf = scrollable(column)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(theme::styles::scroll);
+    let mut shelf = scrollable(column)
+        .id(scroll_id(SHELF_SCROLL))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(theme::styles::scroll);
 
-        if more {
-            shelf = shelf.on_scroll(|viewport: Viewport| {
-                Message::Scrolled(viewport.relative_offset().y)
-            });
-        }
+    if more {
+        shelf = shelf.on_scroll(|viewport: Viewport| {
+            Message::Scrolled(viewport.relative_offset().y)
+        });
+    }
 
-        shelf.into()
-    })
-    .into()
+    shelf.into()
 }
 
 /// Scrollable body of an *endless* shelf whose header does not scroll.
 ///
 /// The `header` — tab pills, a search field, the row of sources — is pinned to the
 /// top of the zone: the screen is a column of two children, a shrink-to-fit header
-/// and a [`responsive_body`] that takes everything below it. Scrolling therefore
-/// carries posters past the pills and never the pills themselves, and the body
-/// still learns its own width for the grid.
+/// and a [`sized_body`] that takes everything below it. Scrolling therefore carries
+/// posters past the pills and never the pills themselves, and the body still knows
+/// how wide it is because the app measured the window for it.
 ///
 /// The header is painted on [`theme::styles::surface`] and shares the horizontal
 /// padding of the body, so the two lines up even though only one of them moves.
-pub fn sticky_body<'a, F>(header: Element<'a, Message>, more: bool, body: F) -> Element<'a, Message>
+pub fn sticky_body<'a, F>(
+    header: Element<'a, Message>,
+    zone_width: f32,
+    more: bool,
+    body: F,
+) -> Element<'a, Message>
 where
-    F: Fn(Size) -> Column<'a, Message> + 'a,
+    F: Fn(f32) -> Column<'a, Message> + 'a,
 {
     Column::new()
         .spacing(0)
@@ -436,7 +511,7 @@ where
                 .width(Length::Fill)
                 .style(theme::styles::surface),
         )
-        .push(responsive_body(more, body))
+        .push(sized_body(zone_width, more, body))
         .into()
 }
 
@@ -832,7 +907,7 @@ mod tests {
     #[test]
     fn the_shelf_tail_and_the_pinned_bodies_build_headlessly() {
         // Никакого рендера не нужно, чтобы собрать дерево: проверка, что нога полки
-        // и оба вида тела — прикреплённое и просто отзывчивое — строятся без паники
+        // и оба вида тела — прикреплённое и просто измеренное — строятся без паники
         // во всех трёх состояниях: загрузка, конец выборки, «ещё есть куда идти».
         let _loading = shelf_tail(true, false, 25);
         let _end = shelf_tail(false, true, 48);
@@ -840,21 +915,46 @@ mod tests {
 
         let header = container(text("Полки каталога")).into();
 
-        let _pinned = sticky_body(header, true, |size: Size| {
-            let columns = grid_columns_for(size.width);
+        let _pinned = sticky_body(header, 1024.0 + BODY_PADDING_X, true, |width: f32| {
+            let columns = grid_columns_for(width);
             Column::new().push(container(text(format!("{columns} колонок плиток")))
                 .width(Length::Fill))
         });
 
-        let _shelf = responsive_body(false, |size: Size| {
+        let _shelf = sized_body(1024.0 + BODY_PADDING_X, false, |width: f32| {
             Column::new().push(container(text(format!(
                 "тело шириной {}",
-                size.width
+                width
             )))
             .width(Length::Fill))
         });
 
         let _plain = scroll_body(Column::new().push(container(text("обычный экран"))));
+
+        let _named = named_scroll_body(
+            Column::new().push(container(text("список серий плеера"))),
+            Id::new("anixart-player-episodes"),
+            None,
+        );
+    }
+
+    #[test]
+    fn a_scrolable_id_is_stable_and_a_chip_never_wraps() {
+        // Прокрутка тела адресуется именем: одно и то же имя обязано давать
+        // одинаковый `Id`, иначе команда «мотать к текущей серии» уйдёт в пустоту.
+        assert_eq!(scroll_id(SHELF_SCROLL), scroll_id(SHELF_SCROLL));
+        assert_eq!(scroll_id(PLAIN_SCROLL), scroll_id(PLAIN_SCROLL));
+        assert_ne!(scroll_id(PLAIN_SCROLL), scroll_id(SHELF_SCROLL));
+
+        // Чип — одна строка, каким бы длинным ни был жанр; ряд чипов разливается
+        // по ширине, а не складывается столбцом.
+        let long = "драма, приключения, сэйнэн, сверхъестественное, психология".to_owned();
+        let _chip = chip(long.clone());
+        let _row = chip_row(vec![long, "12+".to_owned(), String::new(), "2024".to_owned()]);
+
+        // пустой список чипов не рождает ряд-призрак
+        let _nothing = chip_row(vec![String::new(), "  ".to_owned()]);
+        let _void = chip_row(vec![]);
     }
 
     #[test]

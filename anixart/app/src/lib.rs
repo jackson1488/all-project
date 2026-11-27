@@ -34,12 +34,22 @@ pub use app::{App, Message, Screen};
 /// Заголовок окна клиента.
 pub const WINDOW_TITLE: &str = "Anixart Linux";
 
+/// Стартовая ширина окна: из неё [`App::body_width`] считает зону тела до первого
+/// события [`Message::WindowResized`](crate::app::Message::WindowResized).
+pub use app::DEFAULT_WINDOW_WIDTH;
+
 /// Сборка и запуск окна Anixart (используется бинарником `anixart`).
+///
+/// Подписка здесь не деталь: именно она приносит приложению размер окна, поэтому
+/// тела экранов строятся для известной ширины и их [`scrollable`](iced::widget::scrollable)
+/// не пересоздается на каждый кадр — лечение мерцания, описанное в
+/// [`crate::widgets::sized_body`]. Та же подписка опрашивает часы встроенного плеера.
 pub fn run() -> iced::Result {
     iced::application(WINDOW_TITLE, App::update, App::view)
         .theme(|app| app.theme())
+        .subscription(App::subscription)
         .window(iced::window::Settings {
-            size: iced::Size::new(1280.0, 860.0),
+            size: iced::Size::new(DEFAULT_WINDOW_WIDTH as f64, 860.0),
             min_size: Some(iced::Size::new(880.0, 560.0)),
             position: iced::window::Position::Centered,
             ..Default::default()

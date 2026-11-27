@@ -23,6 +23,7 @@
 //! [`ProfileView`], [`ReleaseView`], [`Login`]), а здесь лежат только запросы,
 //! навигация, баннеры и постер-веер.
 
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 use anixart_core::{
@@ -38,6 +39,7 @@ use crate::feed::Feed;
 use crate::lists::{BookmarkTab, BrowseTab, FeedCategory, VariantFilter, WatchStatus};
 use crate::login::{Login, LoginMethod, PasteTarget, TelegramPaste};
 use crate::net;
+use crate::player::{self, apply_tick, Player, TICK_INTERVAL};
 use crate::posters::{self, PosterCache, PosterEffect};
 use crate::profile::{ProfileSnapshot, ProfileView};
 use crate::release::{Back, ReleaseView};
@@ -49,6 +51,12 @@ use crate::widgets;
 
 /// Ширина навигационной панели — четырёх разделов, которые всегда под рукой.
 const RAIL_WIDTH: f32 = 210.0;
+
+/// Стартовая ширина окна из [`crate::run`] — то, чем измеряется тело экрана до
+/// первого события [`Message::WindowResized`]. Прилёт этого события приходит вместе
+/// с первым кадром, так что константа лишь держит разумное значение в промежуток
+/// между `startup` и первой подпиской.
+pub const DEFAULT_WINDOW_WIDTH: f32 = 1280.0;
 
 /// Экраны клиента.
 ///
@@ -66,6 +74,9 @@ pub enum Screen {
     /// Отдельный экран «Источники и серии» выбранной озвучки — вторая ступень
     /// спуска, на которую уводит выбор варианта на странице релиза.
     Sources,
+    /// Встроенный плеер: `mpv` с управляющим сокетом, пилюли качества и список
+    /// серий прямо в окне клиента ([`crate::player`]).
+    Player,
     Collection,
 }
 
@@ -88,6 +99,7 @@ impl Screen {
             Screen::Profile => "Профиль",
             Screen::Release => "Релиз",
             Screen::Sources => "Источники и серии",
+            Screen::Player => "Плеер",
             Screen::Collection => "Коллекция",
         }
     }
@@ -201,15 +213,43 @@ pub enum Message {
     ReleaseBack,
     TypesLoaded(Result<Vec<EpisodeType>, String>),
     SelectType(usize),
-    SourcesLoaded(Result<Vec<Source>, String>),
+    /// Источники озвучки вместе с её id: ответ ложится в
+    /// [`ReleaseView::sources_by_type`] тем ключом, который его запросил, а не
+    /// тем, что выбран в момент прилёта — запоздавший ответ о прошлой озвучке не
+    /// должен подменить список нынешней.
+    SourcesLoaded(i64, Result<Vec<Source>, String>),
     SelectSource(usize),
-    EpisodesLoaded(Result<Vec<Episode>, String>),
+    /// Серии пары «озвучка + источник» под тем же ключом и по той же причине.
+    EpisodesLoaded((i64, i64), Result<Vec<Episode>, String>),
     PlayEpisode(usize),
     /// Пилюля «Сначала 1-я / Сначала новая»: меняет направление списка серий.
     /// Только перестановка рядов — `episodes`, `pending` и `playing` остаются
     /// на своих местах ([`crate::release::ReleaseView::ordered_episodes`]).
     ToggleEpisodeOrder,
     PlaybackResolved(Result<ParsedVideo, String>),
+
+    // ── Встроенный плеер ───────────────────────────────────────────────────
+    /// Подписка: размер окна. Ширина зоны тела экрана считается из него, и именно
+    /// поэтому полки перестают мерцать — [`iced::widget::responsive`] больше не
+    /// пересоздаёт [`scrollable`] на каждой смене layout
+    /// ([`crate::widgets::sized_body`]).
+    WindowResized(iced::window::Id, Size),
+    /// «Пауза / Продолжить».
+    PlayerPauseToggle,
+    /// Перемотка на `delta` секунд: −10, +10, +85 против опенинга.
+    PlayerSeek(f64),
+    /// Пилюля качества: тот же поток, другая ссылка, та же секунда.
+    PlayerQuality(String),
+    /// «Предыдущая серия» и «Следующая серия» — в порядке видимого списка.
+    PlayerPrevious,
+    PlayerNext,
+    /// «← Назад к сериям»: процесс убивается, сокет стирается, экран отступает.
+    PlayerBack,
+    /// Ответ подписки [`Player::tick`]: позиция, длительность, пауза.
+    PlayerTick(Result<Vec<Option<serde_json::Value>>, String>),
+    /// Ответ одной управлющей команды: `Ok` — mpv принял, `Err` — подсказка в шапку.
+    PlayerCommanded(Result<(), String>),
+
     /// Запись просмотренной серии в историю — фоновая, её отказ не мешает смотреть.
     HistoryRecorded(Result<(), String>),
     ToggleFavorite(bool),
@@ -248,6 +288,14 @@ pub struct App {
     pub posters: PosterCache,
     /// Где токен сессии переживает перезапуск.
     pub store: SessionStore,
+    /// Встроенный плеер: процесс `mpv`, его сокет и часы просмотра.
+    pub player: Player,
+    /// Ширина окна из подписки [`Message::WindowResized`].
+    ///
+    /// Экран строится для известной ширины, поэтому [`scrollable`] живёт в корне
+    /// дерева экрана и не пересоздается на каждый пересчёт layout — это и есть
+    /// лечение мерцания, описанное в [`crate::widgets::sized_body`].
+    pub window_width: f32,
 }
 
 /// Полка «Главной» → её сообщение: пилюля, которая запросила ответ, едет вместе с
@@ -386,55 +434,8 @@ fn collection_body<'a>(
         )
 }
 
-/// Аргументы, с которыми стартует `mpv`, — вынесены отдельно от запуска, потому что
-/// ровно они и есть «лучшее качество, форсированное окно, русский заголовок»:
-///
-/// * `--force-window=immediate` — окно показывается сразу, ещё до первой декады
-///   кадров. Без него `mpv` на сетевой ссылке стартует в терминале, и пользователь
-///   видит пустоту, пока буфер не наполнится.
-/// * `--no-terminal` — плеер не пишет статус-строки в терминал родителя: у окна
-///   их всё равно не видно, а засорённый лог мешался бы под отладкой.
-/// * `--title=<Релиз — Серия>` — заголовок окна и списка окон, поэтому серию
-///   узнаёшь среди прочих приложений, не заглядывая в плеер. Пустая подпись не
-///   рождает аргумента с голым тире.
-/// * `--http-header-fields=…` — заголовки, которые собрал решатель (Referer,
-///   User-Agent и прочее), без них часть хостов отдаёт 403.
-///
-/// Ошибка — «ни одной играбельной ссылки», когда решатель не принёс ничего.
-pub fn mpv_arguments(video: &ParsedVideo, caption: &str) -> Result<Vec<String>, String> {
-    let url = video
-        .best_url()
-        .ok_or_else(|| "Ни одной играбельной ссылки не найдено".to_owned())?;
-
-    let mut arguments = vec!["--force-window=immediate".to_owned(), "--no-terminal".to_owned()];
-    let title = caption.trim();
-    if !title.is_empty() {
-        arguments.push(format!("--title={title}"));
-    }
-    arguments.push(url.to_owned());
-    for (name, value) in &video.headers {
-        arguments.push(format!("--http-header-fields={name}: {value}"));
-    }
-    Ok(arguments)
-}
-
-/// Передача лучшей найденной ссылки внешнему процессу `mpv`.
-///
-/// Плеер стартует откреплённым: `stdin` закрыт, чтобы он не перехватывал клавиши
-/// терминала клиента, а `stdout` / `stderr` остаются унаследованными — там и
-/// пишется его собственная диагностика. Держать `Child` незачем, остановка
-/// просмотра — дело рук пользователя в окне `mpv`.
-pub fn play_with_mpv(video: &ParsedVideo, caption: &str) -> Result<(), String> {
-    let mut command = Command::new("mpv");
-    command.args(mpv_arguments(video, caption)?);
-    command.stdin(Stdio::null());
-
-    command
-        .spawn()
-        .map_err(|e| format!("mpv не запустился: {e}"))?;
-
-    Ok(())
-}
+/// Аргументы `mpv`, его запуск и внешний резервный путь живут в
+/// [`crate::player`] — там же, где и экран плеера, которому эти команды нужны.
 
 /// Открытие URL в браузере пользователя — `xdg-open` (затем `gio` /
 /// `sensible-browser`) на Linux, `open` на macOS, `cmd /C start` на Windows.
@@ -503,6 +504,9 @@ impl App {
     pub fn with_store(store: SessionStore) -> Self {
         Self {
             store,
+            // стартовая ширина того же окна, что задаёт [`crate::run`]: тело экрана
+            // измерено до прихода первого `WindowResized`
+            window_width: DEFAULT_WINDOW_WIDTH,
             ..Default::default()
         }
     }
@@ -510,7 +514,7 @@ impl App {
     /// Начальное состояние: восстановленная сессия, если файл конфигурации её
     /// хранит, — и сразу «Главная».
     pub fn startup() -> (Self, Task<Message>) {
-        let mut app = Self::with_store(SessionStore::from_env());
+        let app = Self::with_store(SessionStore::from_env());
         let task = app.restore_session();
         (app, task)
     }
@@ -802,6 +806,9 @@ impl App {
                 Task::none()
             }
             Message::Logout => {
+                // Выход закрывает и просмотр: процесс `mpv` пережил бы `*self = …`,
+                // а его сокет остался бы в `/tmp` до конца сессии.
+                self.player.stop();
                 let _ = self.store.clear();
                 let store = self.store.clone();
                 *self = Self::with_store(store);
@@ -941,11 +948,12 @@ impl App {
             Message::OpenRelease(id) => {
                 self.push_screen(Screen::Release);
                 self.error = None;
-                self.release = ReleaseView {
-                    loading: true,
-                    signed_in: self.signed_in(),
-                    ..Default::default()
-                };
+                // Другой релиз — другой плеер: прежний процесс с его сокетом здесь
+                // уже не нужен, а держать два `mpv` за одним экраном нельзя.
+                self.player.stop();
+                self.release.reset();
+                self.release.loading = true;
+                self.release.signed_in = self.signed_in();
                 Task::perform(net::release(self.token.clone(), id), Message::ReleaseLoaded)
             }
             Message::ReleaseLoaded(Ok(release)) => {
@@ -986,7 +994,9 @@ impl App {
             Message::TypesLoaded(Ok(types)) => {
                 self.release.types = types;
                 self.release.loading_types = false;
-                Task::none()
+                // Первый вариант озвучки догоняет источники вперёд: экран
+                // источников откроется без единого запроса на показ.
+                self.prefetch_sources()
             }
             Message::TypesLoaded(Err(error)) => {
                 self.release.loading_types = false;
@@ -998,7 +1008,7 @@ impl App {
                     self.release.release_id(),
                     self.release.types.get(index).map(|kind| kind.id),
                 );
-                let (Some(release_id), Some(type_id)) = ids else {
+                let (Some(_release_id), Some(type_id)) = ids else {
                     return Task::none();
                 };
 
@@ -1008,38 +1018,35 @@ impl App {
                 self.release.episodes.clear();
                 self.release.playing = None;
                 self.release.pending = None;
-                self.release.loading_sources = true;
                 // Озвучка выбрана — экран становится отдельным: на нём источники
                 // этой озвучки и, под ними, серии выбранного источника.
                 self.push_screen(Screen::Sources);
-
-                Task::perform(
-                    net::sources(self.token.clone(), release_id, type_id),
-                    Message::SourcesLoaded,
-                )
+                self.open_sources(type_id)
             }
-            Message::SourcesLoaded(Ok(sources)) => {
-                self.release.sources = sources;
-                self.release.loading_sources = false;
+            Message::SourcesLoaded(type_id, Ok(sources)) => {
+                self.release.remember_sources(type_id, sources);
+                // Ответ о нынешней озвучке открывает список сразу: источники уже
+                // в кэше, и ни одного запроса на показ этого экрана не уходит.
+                if self.release.type_id() == Some(type_id) && self.release.selected_source.is_none()
+                {
+                    if let Some(source_id) = self.release.first_source_id() {
+                        self.release.selected_source = Some(0);
+                        self.prefetch_episodes(type_id, source_id);
+                    }
+                }
                 Task::none()
             }
-            Message::SourcesLoaded(Err(error)) => {
+            Message::SourcesLoaded(_, Err(error)) => {
                 self.release.loading_sources = false;
                 self.error = Some(error);
                 Task::none()
             }
             Message::SelectSource(index) => {
-                let type_id = self
-                    .release
-                    .selected_type
-                    .and_then(|step| self.release.types.get(step))
-                    .map(|kind| kind.id);
                 let ids = (
-                    self.release.release_id(),
-                    type_id,
+                    self.release.type_id(),
                     self.release.sources.get(index).map(|source| source.id),
                 );
-                let (Some(release_id), Some(type_id), Some(source_id)) = ids else {
+                let (Some(type_id), Some(source_id)) = ids else {
                     return Task::none();
                 };
 
@@ -1047,19 +1054,13 @@ impl App {
                 self.release.episodes.clear();
                 self.release.playing = None;
                 self.release.pending = None;
-                self.release.loading_episodes = true;
-
-                Task::perform(
-                    net::episodes(self.token.clone(), release_id, type_id, source_id),
-                    Message::EpisodesLoaded,
-                )
+                self.open_episodes(type_id, source_id)
             }
-            Message::EpisodesLoaded(Ok(episodes)) => {
-                self.release.episodes = episodes;
-                self.release.loading_episodes = false;
+            Message::EpisodesLoaded(key, Ok(episodes)) => {
+                self.release.remember_episodes(key, episodes);
                 Task::none()
             }
-            Message::EpisodesLoaded(Err(error)) => {
+            Message::EpisodesLoaded(_, Err(error)) => {
                 self.release.loading_episodes = false;
                 self.error = Some(error);
                 Task::none()
@@ -1070,71 +1071,121 @@ impl App {
                 self.release.toggle_episode_order();
                 Task::none()
             }
-            Message::PlayEpisode(index) => {
-                // Одна ссылка уже в полёте: второе нажатие подняло бы второй процесс
-                // `mpv` поверх первого, поэтому запрос ждёт своего ответа.
-                if self.release.pending.is_some() {
-                    return Task::none();
-                }
-
-                let url = self
-                    .release
-                    .episode(index)
-                    .map(|episode| episode.url.trim().to_owned());
-                let Some(url) = url.filter(|url| !url.is_empty()) else {
-                    self.error = Some(
-                        "У этой серии нет ссылки для воспроизведения — выберите другую \
-                         озвучку или источник"
-                            .to_owned(),
-                    );
-                    return Task::none();
-                };
-
-                self.release.pending = Some(index);
-                self.release.playing = None;
-                self.error = None;
-                Task::perform(net::resolve(url), Message::PlaybackResolved)
-            }
+            Message::PlayEpisode(index) => self.request_episode(index),
             Message::PlaybackResolved(Ok(video)) => {
                 let pending = self.release.pending.take();
                 let caption = self.playback_caption(pending);
+                let voiceover = self.release.type_name().unwrap_or_default();
+                let source = self.release.source_name().unwrap_or_default();
 
-                match play_with_mpv(&video, &caption) {
+                // Плеер встроенный: `mpv` стартует с управляющим сокетом, и экран
+                // остаётся в окне клиента — с пилюлями качества, перемоткой и
+                // списком серий. Не заводится — откат на внешний запуск, как раньше.
+                match self.player.start(video.clone(), &caption, &voiceover, &source, None) {
                     Ok(()) => {
+                        self.player.episode = pending;
                         self.release.playing = pending;
+                        self.release.pending = None;
                         self.error = None;
-                        // Просмотр начался: это не ошибка, но пользователю полезно
-                        // знать, что плеер поднят и что именно он играет.
-                        self.status = Some(format!("mpv запущен: {caption}"));
+                        self.push_screen(Screen::Player);
+                        self.status = Some(format!("Плеер запущен: {caption}"));
+                        return self.record_history(pending);
                     }
                     Err(error) => {
-                        self.error = Some(error);
-                        return Task::none();
+                        if player::play_external(&video, &caption).is_err() {
+                            self.error = Some(error);
+                            return Task::none();
+                        }
+                        self.release.playing = pending;
+                        self.error = None;
+                        self.status = Some(format!("mpv запущен отдельно: {caption}"));
                     }
                 }
 
-                // Серия сыграла — профиль запоминает её. Без токена записи нет, и
-                // запрос не строится.
-                let (Some(release_id), Some(source_id)) =
-                    (self.release.release_id(), self.release.source_id())
-                else {
-                    return Task::none();
-                };
-                if !self.signed_in() {
-                    return Task::none();
-                }
-                let position = pending
-                    .and_then(|index| self.release.episode(index))
-                    .map_or(0, |episode| episode.position.max(0));
-
-                Task::perform(
-                    net::history_add(self.token.clone(), release_id, source_id, position),
-                    Message::HistoryRecorded,
-                )
+                self.record_history(pending)
             }
             Message::PlaybackResolved(Err(error)) => {
                 self.release.pending = None;
                 self.error = Some(error);
+                Task::none()
+            }
+
+            // ── Встроенный плеер ───────────────────────────────────────────
+            Message::WindowResized(_window, size) => {
+                // Единственное окно клиента — любое его изменение и есть размер
+                // тела: фильтр по id здесь только потерял бы первый кадр после старта.
+                self.window_width = size.width;
+                Task::none()
+            }
+            Message::PlayerPauseToggle => {
+                let Some(command) = self.player.set_paused(!self.player.paused) else {
+                    return Task::none();
+                };
+                let socket = self.player.socket().map(Path::to_path_buf);
+                self.player.paused = !self.player.paused;
+                match socket {
+                    Some(socket) => Task::perform(
+                        player::ipc(socket, command),
+                        |reply| Message::PlayerCommanded(reply.map(|_| ())),
+                    ),
+                    None => Task::none(),
+                }
+            }
+            Message::PlayerSeek(delta) => {
+                let Some(command) = self.player.seek(delta) else {
+                    return Task::none();
+                };
+                let socket = self.player.socket().map(Path::to_path_buf);
+                match socket {
+                    Some(socket) => Task::perform(
+                        player::ipc(socket, command),
+                        |reply| Message::PlayerCommanded(reply.map(|_| ())),
+                    ),
+                    None => Task::none(),
+                }
+            }
+            Message::PlayerQuality(quality) => {
+                let Some((video, resume)) = self.player.switch_quality(&quality) else {
+                    return Task::none();
+                };
+                let caption = self.player.caption.clone();
+                let voiceover = self.player.voiceover.clone();
+                let source = self.player.source.clone();
+                let episode = self.player.episode;
+
+                match self.player.start(video, &caption, &voiceover, &source, Some(resume)) {
+                    Ok(()) => {
+                        self.player.episode = episode;
+                        self.error = None;
+                        self.status = Some(format!("Качество переключено: {quality}"));
+                        Task::none()
+                    }
+                    Err(error) => {
+                        self.error = Some(error);
+                        Task::none()
+                    }
+                }
+            }
+            Message::PlayerPrevious => self.step_episode(false),
+            Message::PlayerNext => self.step_episode(true),
+            Message::PlayerBack => {
+                // Окно `mpv` закрывается вместе с экраном: сокет больше не нужен,
+                // а список серий остаётся на месте — «Назад к сериям» ведёт туда.
+                self.player.stop();
+                if self.screen == Screen::Player {
+                    self.pop_screen();
+                }
+                Task::none()
+            }
+            Message::PlayerCommanded(reply) => {
+                match reply {
+                    Ok(()) => self.player.last_error = None,
+                    Err(error) => self.player.last_error = Some(error),
+                }
+                Task::none()
+            }
+            Message::PlayerTick(reply) => {
+                apply_tick(&mut self.player, reply.map(|values| values.to_vec()));
                 Task::none()
             }
             Message::HistoryRecorded(Ok(())) => Task::none(),
@@ -1213,8 +1264,14 @@ impl App {
                 Task::none()
             }
             Message::ReleaseBack => {
-                // Спуск сворачивается по одной ступени: серии → экран источников →
-                // озвучки, и только потом закрывается сама страница релиза.
+                // Спуск сворачивается по одной ступени: плеер → серии → экран
+                // источников → озвучки, и только потом закрывается сама страница
+                // релиза. Плеер отступает вместе со своим процессом.
+                if self.screen == Screen::Player {
+                    self.player.stop();
+                    self.pop_screen();
+                    return Task::none();
+                }
                 let at_sources = self.screen == Screen::Sources;
                 match self.release.back(at_sources) {
                     Back::Sources => {}
@@ -1443,6 +1500,175 @@ impl App {
         }
     }
 
+    /// Ширина зоны, которую занимает активный экран: окно минус панель.
+    ///
+    /// Отсюда [`widgets::sized_body`] получает число колонок сетки, и отсюда же —
+    /// главное — [`scrollable`] экрана строится вне всякого измерителя: ширина
+    /// известна до сборки дерева, поэтому прилёт обложки больше не пересоздаёт
+    /// прокрутку и не сбрасывает смещение пользователя. До первого события
+    /// [`Message::WindowResized`] держится стартовое значение [`DEFAULT_WINDOW_WIDTH`]
+    /// — ровно тот размер окна, с которым приложение запускается.
+    pub fn body_width(&self) -> f32 {
+        let rail = if self.screen == Screen::Login {
+            0.0
+        } else {
+            RAIL_WIDTH
+        };
+        (self.window_width - rail).max(320.0)
+    }
+
+    /// Подписки приложения: размер окна и часы встроенного плеера.
+    ///
+    /// `resize_events` приходит на каждое изменение окна — то самое, что прежде
+    /// измерял [`iced::widget::responsive`], но один раз на уровне приложения, а не
+    /// на каждом кадре дерева. `every` будит сокет `mpv` только когда плеер реально
+    /// поднят: на всех прочих экранах подписка пустая и никаких соединений нет.
+    pub fn subscription(&self) -> iced::Subscription<Message> {
+        let resizes = iced::window::resize_events()
+            .map(|(window, size)| Message::WindowResized(window, size));
+
+        let Some(tick) = self.player.tick() else {
+            return resizes;
+        };
+        let clock = iced::time::every(TICK_INTERVAL).map(move |_| Message::PlayerTick(Ok(tick)));
+        iced::Subscription::batch([resizes, clock])
+    }
+
+    /// Источники озвучки: из кэша — мгновенно, иначе одним запросом вперёд.
+    ///
+    /// Вызывается и когда пользователь сам жмёт на озвучку ([`Message::SelectType`]),
+    /// и когда экран только готовится: второй визит на ту же озвучку не видит ни
+    /// одного запроса.
+    fn open_sources(&mut self, type_id: i64) -> Task<Message> {
+        if self.release.cached_sources(type_id) {
+            self.release.selected_source = None;
+            self.release.episodes.clear();
+            self.release.playing = None;
+            self.release.pending = None;
+            return Task::none();
+        }
+
+        let Some(release_id) = self.release.release_id() else {
+            return Task::none();
+        };
+        self.release.loading_sources = true;
+        Task::perform(
+            net::sources(self.token.clone(), release_id, type_id),
+            move |sources| Message::SourcesLoaded(type_id, sources),
+        )
+    }
+
+    /// Догоняет источники первой озвучки, не открывая экрана: как только
+    /// [`Message::TypesLoaded`] принесёт варианты, первый из них уже лежит в кэше.
+    fn prefetch_sources(&mut self) -> Task<Message> {
+        let Some(type_id) = self.release.types.first().map(|kind| kind.id) else {
+            return Task::none();
+        };
+        if self.release.has_cached_sources(type_id) {
+            return Task::none();
+        }
+        self.open_sources(type_id)
+    }
+
+    /// Серии пары «озвучка + источник»: кэш отвечает сразу, иначе — запрос.
+    fn open_episodes(&mut self, type_id: i64, source_id: i64) -> Task<Message> {
+        let key = (type_id, source_id);
+        if self.release.cached_episodes(key) {
+            self.release.playing = None;
+            self.release.pending = None;
+            return Task::none();
+        }
+
+        let Some(release_id) = self.release.release_id() else {
+            return Task::none();
+        };
+        self.release.loading_episodes = true;
+        Task::perform(
+            net::episodes(self.token.clone(), release_id, type_id, source_id),
+            move |episodes| Message::EpisodesLoaded(key, episodes),
+        )
+    }
+
+    /// Догоняет серии первого источника, не выбирая его: экран источников
+    /// открывается уже с готовым списком, пока пользователь читает хосты.
+    fn prefetch_episodes(&mut self, type_id: i64, source_id: i64) {
+        let key = (type_id, source_id);
+        if self.release.has_cached_episodes(key) {
+            return;
+        }
+        let _ = self.open_episodes(type_id, source_id);
+    }
+
+    /// Разрешает ссылку серии и поднимает встроенный плеер.
+    ///
+    /// Одна ссылка уже в полёте: второе нажатие подняло бы второй процесс `mpv`
+    /// поверх первого, поэтому запрос ждёт своего ответа.
+    fn request_episode(&mut self, index: usize) -> Task<Message> {
+        if self.release.pending.is_some() {
+            return Task::none();
+        }
+
+        let url = self
+            .release
+            .episode(index)
+            .map(|episode| episode.url.trim().to_owned());
+        let Some(url) = url.filter(|url| !url.is_empty()) else {
+            self.error = Some(
+                "У этой серии нет ссылки для воспроизведения — выберите другую \
+                 озвучку или источник"
+                    .to_owned(),
+            );
+            return Task::none();
+        };
+
+        self.release.pending = Some(index);
+        self.release.playing = None;
+        self.error = None;
+        Task::perform(net::resolve(url), Message::PlaybackResolved)
+    }
+
+    /// «Предыдущая / Следующая серия»: шаг по видимому порядку списка.
+    ///
+    /// Порядок берётся у [`ReleaseView::ordered_episodes`], поэтому «Следующая»
+    /// означает «ниже по экрану», а не «дальше по ответу сервера» — пользователь
+    /// идёт туда, куда смотрит.
+    fn step_episode(&mut self, forward: bool) -> Task<Message> {
+        let Some(current) = self.player.episode.or(self.release.playing) else {
+            return Task::none();
+        };
+        let order = self.release.ordered_episodes();
+        let Some(next) = player::neighbour_episode(&order, current, forward) else {
+            self.status = Some(if forward {
+                "Это была последняя серия в списке".to_owned()
+            } else {
+                "Вы уже на первой серии списка".to_owned()
+            });
+            return Task::none();
+        };
+        self.request_episode(next)
+    }
+
+    /// Запись сыгранной серии в историю профиля: без токена и без выбранного
+    /// источника запроса нет, а отказ сервера — подсказка, а не ошибка.
+    fn record_history(&self, pending: Option<usize>) -> Task<Message> {
+        let (Some(release_id), Some(source_id)) =
+            (self.release.release_id(), self.release.source_id())
+        else {
+            return Task::none();
+        };
+        if !self.signed_in() {
+            return Task::none();
+        }
+        let position = pending
+            .and_then(|index| self.release.episode(index))
+            .map_or(0, |episode| episode.position.max(0));
+
+        Task::perform(
+            net::history_add(self.token.clone(), release_id, source_id, position),
+            Message::HistoryRecorded,
+        )
+    }
+
     /// Первая страница полки «Главная» или её догрузка.
     ///
     /// `POST /filter/{page}` не требует токена, поэтому полка одинаково работает и
@@ -1580,6 +1806,8 @@ impl App {
             Screen::Profile => self.profile.artwork(),
             Screen::Release => self.release.artwork(),
             Screen::Sources => self.release.artwork(),
+            // Плеер показывает обложку релиза в шапке — тот же единственный постер
+            Screen::Player => self.release.artwork(),
             Screen::Collection => self.collection_artwork(),
         };
 
@@ -1665,24 +1893,27 @@ impl App {
     /// Активный экран.
     fn screen_body(&self) -> Element<'_, Message> {
         let cache = &self.posters;
+        let zone = self.body_width();
         match self.screen {
             Screen::Login => self.login.view(),
-            Screen::Feed => self.feed.view(cache),
-            Screen::Browse => self.browse.view(cache),
-            Screen::Bookmarks => self.bookmarks.view(cache),
+            Screen::Feed => self.feed.view(cache, zone),
+            Screen::Browse => self.browse.view(cache, zone),
+            Screen::Bookmarks => self.bookmarks.view(cache, zone),
             Screen::Profile => self.profile.view(cache),
             Screen::Release => self.release.view(cache),
-            Screen::Sources => self.release.sources_view(cache),
+            Screen::Sources => self.release.sources_view(zone),
+            Screen::Player => player::view(&self.player, &self.release, cache, zone),
             Screen::Collection => self.collection_view(cache),
         }
     }
 
     /// Страница коллекции: карточка с обложкой и сетка её релизов.
     ///
-    /// Тело строится [`widgets::responsive_body`], поэтому сетка берёт столько
-    /// колонок, сколько действительно вмещает измеренная зона, а не константные
-    /// четыре. Догрузка здесь не нужна: `/collection/{id}` отвечает всеми своими
-    /// релизами одним запросом.
+    /// Тело строится [`widgets::sized_body`] с шириной, которую приложение знает
+    /// из подписки на события окна, поэтому сетка берёт столько колонок, сколько
+    /// действительно вмещает измеренная зона, а не константные четыре. Догрузка
+    /// здесь не нужна: `/collection/{id}` отвечает всеми своими релизами одним
+    /// запросом.
     fn collection_view<'a>(&'a self, cache: &'a PosterCache) -> Element<'a, Message> {
         if self.collection_loading {
             return widgets::scroll_body(
@@ -1701,8 +1932,8 @@ impl App {
             )));
         };
 
-        widgets::responsive_body(false, move |size: Size| {
-            collection_body(collection, cache, widgets::grid_columns_for(size.width))
+        widgets::sized_body(self.body_width(), false, move |width: f32| {
+            collection_body(collection, cache, widgets::grid_columns_for(width))
         })
     }
 

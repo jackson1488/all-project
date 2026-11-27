@@ -299,11 +299,11 @@ impl Bookmarks {
         body
     }
 
-    pub fn view<'a>(&'a self, cache: &'a PosterCache) -> Element<'a, Message> {
+    pub fn view<'a>(&'a self, cache: &'a PosterCache, zone_width: f32) -> Element<'a, Message> {
         let more = self.signed_in && self.can_load_more() && !self.is_empty();
 
-        widgets::sticky_body(self.header(), more, move |size| {
-            self.shelf(cache, widgets::grid_columns_for(size.width))
+        widgets::sticky_body(self.header(), zone_width, more, move |width| {
+            self.shelf(cache, widgets::grid_columns_for(width))
         })
     }
 }
@@ -311,6 +311,9 @@ impl Bookmarks {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Ширина зоны тела экрана в тестах: окно 1280 px минус навигационная панель.
+    const ZONE_WIDTH: f32 = 1070.0;
     use anixart_core::Profile;
 
     fn releases(ids: &[i64]) -> Pageable<Release> {
@@ -587,7 +590,7 @@ mod tests {
 
         // гость: подсказка вместо данных, и никаких ног полки
         let guest = Bookmarks::default();
-        let _ = guest.view(&cache);
+        let _ = guest.view(&cache, ZONE_WIDTH);
 
         for tab in BookmarkTab::ALL {
             let mut bookmarks = Bookmarks {
@@ -595,10 +598,10 @@ mod tests {
                 signed_in: true,
                 ..Default::default()
             };
-            let _ = bookmarks.view(&cache);
+            let _ = bookmarks.view(&cache, ZONE_WIDTH);
 
             bookmarks.paging.loading = true;
-            let _ = bookmarks.view(&cache);
+            let _ = bookmarks.view(&cache, ZONE_WIDTH);
 
             bookmarks.paging.loading = false;
             bookmarks.begin();
@@ -606,16 +609,16 @@ mod tests {
                 BookmarkTab::Collections => BookmarkPage::Collections(collections(&[1, 2])),
                 _ => BookmarkPage::Releases(releases(&[1, 2, 3, 4, 5])),
             });
-            let _ = bookmarks.view(&cache);
+            let _ = bookmarks.view(&cache, ZONE_WIDTH);
 
             bookmarks.begin_more();
-            let _ = bookmarks.view(&cache);
+            let _ = bookmarks.view(&cache, ZONE_WIDTH);
 
             bookmarks.apply(match tab {
                 BookmarkTab::Collections => BookmarkPage::Collections(collections(&[])),
                 _ => BookmarkPage::Releases(releases(&[])),
             });
-            let _ = bookmarks.view(&cache);
+            let _ = bookmarks.view(&cache, ZONE_WIDTH);
         }
     }
 }

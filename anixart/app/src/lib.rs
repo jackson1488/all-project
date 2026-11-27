@@ -20,6 +20,7 @@ pub mod feed;
 pub mod lists;
 pub mod login;
 pub mod net;
+pub mod player;
 pub mod posters;
 pub mod profile;
 pub mod release;
@@ -49,7 +50,7 @@ pub fn run() -> iced::Result {
         .theme(|app| app.theme())
         .subscription(App::subscription)
         .window(iced::window::Settings {
-            size: iced::Size::new(DEFAULT_WINDOW_WIDTH as f64, 860.0),
+            size: iced::Size::new(DEFAULT_WINDOW_WIDTH, 860.0),
             min_size: Some(iced::Size::new(880.0, 560.0)),
             position: iced::window::Position::Centered,
             ..Default::default()
@@ -59,9 +60,10 @@ pub fn run() -> iced::Result {
 
 #[cfg(test)]
 mod app_tests {
-    use crate::app::{mpv_arguments, play_with_mpv, App, Message, Screen};
+    use crate::app::{App, Message, Screen};
     use crate::lists::{BrowseTab, FeedCategory};
     use crate::login::{LoginMethod, PasteTarget};
+    use crate::player::{mpv_arguments, play_with_mpv};
     use crate::release::ReleaseView;
     use crate::session::SessionStore;
 

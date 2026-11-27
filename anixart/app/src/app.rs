@@ -434,8 +434,8 @@ fn collection_body<'a>(
         )
 }
 
-/// Аргументы `mpv`, его запуск и внешний резервный путь живут в
-/// [`crate::player`] — там же, где и экран плеера, которому эти команды нужны.
+// Аргументы `mpv`, его запуск и внешний резервный путь живут в
+// `crate::player` — там же, где и экран плеера, которому эти команды нужны.
 
 /// Открытие URL в браузере пользователя — `xdg-open` (затем `gio` /
 /// `sensible-browser`) на Linux, `open` на macOS, `cmd /C start` на Windows.
@@ -514,7 +514,7 @@ impl App {
     /// Начальное состояние: восстановленная сессия, если файл конфигурации её
     /// хранит, — и сразу «Главная».
     pub fn startup() -> (Self, Task<Message>) {
-        let app = Self::with_store(SessionStore::from_env());
+        let mut app = Self::with_store(SessionStore::from_env());
         let task = app.restore_session();
         (app, task)
     }
@@ -2453,7 +2453,7 @@ mod tests {
         assert_eq!(app.release.type_id(), Some(6));
         assert!(app.release.loading_sources);
 
-        let _ = app.update(Message::SourcesLoaded(Ok(vec![Source {
+        let _ = app.update(Message::SourcesLoaded(6, Ok(vec![Source {
             id: 77,
             name: "Kodik".to_owned(),
             ..Default::default()
@@ -2462,7 +2462,7 @@ mod tests {
         assert!(app.release.loading_episodes);
         assert_eq!(app.screen, Screen::Sources, "источник — та же ступень");
 
-        let _ = app.update(Message::EpisodesLoaded(Ok(vec![Episode {
+        let _ = app.update(Message::EpisodesLoaded((6, 77), Ok(vec![Episode {
             id: 1,
             position: 1,
             url: "https://kodik.example/1".to_owned(),

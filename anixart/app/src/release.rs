@@ -86,7 +86,7 @@ impl ReleaseView {
 
     /// Название открытого релиза — для заголовка окна `mpv`.
     pub fn title(&self) -> Option<String> {
-        self.release.as_ref().map(|release| widgets::release_title(release))
+        self.release.as_ref().map(widgets::release_title)
     }
 
     /// Статус списка профиля, который сейчас показан на пилюлях.
@@ -110,7 +110,7 @@ impl ReleaseView {
     pub fn type_name(&self) -> Option<String> {
         self.selected_type
             .and_then(|index| self.types.get(index))
-            .map(|kind| widgets::voiceover_title(kind))
+            .map(widgets::voiceover_title)
     }
 
     /// id выбранного источника.

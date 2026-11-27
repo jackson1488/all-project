@@ -726,8 +726,8 @@ mod tests {
         assert!(reached_end(1.0), "дно — всегда повод");
         // порог оставлен с запасом до единицы: последний кадр прокрутки обязан
         // пойматься, пока смещение ещё не дошло до 1.0
-        assert!(SCROLL_TRIGGER > 0.5);
-        assert!(SCROLL_TRIGGER < 1.0);
+        const { assert!(SCROLL_TRIGGER > 0.5) };
+        const { assert!(SCROLL_TRIGGER < 1.0) };
         // отрицательное смещение — не дно, каким бы оно ни было в отладке
         assert!(!reached_end(-1.0));
     }

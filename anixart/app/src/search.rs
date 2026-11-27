@@ -199,7 +199,10 @@ impl Browse {
         )
     }
 
-    pub fn view<'a>(&'a self, cache: &'a PosterCache) -> Element<'a, Message> {
+    /// Шапка «Обзора»: пилюли полок, поле запроса и ряд сортировки — всё, чем этот
+    /// экран управляется. Она прикреплена к верху зоны, поэтому прокрутка стены
+    /// постеров не уносит за собой ни вкладки, ни незаполненное поле поиска.
+    fn header<'a>(&'a self) -> Element<'a, Message> {
         let pills = BrowseTab::ALL.iter().fold(Row::new().spacing(8), |row, tab| {
             row.push(widgets::pill(
                 tab.label().to_owned(),
@@ -208,8 +211,9 @@ impl Browse {
             ))
         });
 
-        let mut body = Column::new()
-            .spacing(12)
+        let mut header = Column::new()
+            .spacing(10)
+            .push(widgets::subhead(self.shelf_title()))
             .push(widgets::section("Полки обзора".to_owned(), pills.wrap()));
 
         if self.tab.needs_query() {
@@ -222,7 +226,7 @@ impl Browse {
                 if self.paging.loading { "Ищу…" } else { "Искать" },
                 (!self.paging.loading).then_some(Message::SearchSubmit),
             );
-            body = body.push(widgets::section(
+            header = header.push(widgets::section(
                 "Запрос".to_owned(),
                 Row::new().spacing(10).push(input).push(action),
             ));
@@ -236,8 +240,16 @@ impl Browse {
                     Message::BrowseSort(*id),
                 ))
             });
-            body = body.push(widgets::section("Сортировка".to_owned(), sorts.wrap()));
+            header = header.push(widgets::section("Сортировка".to_owned(), sorts.wrap()));
         }
+
+        header.into()
+    }
+
+    /// Тело полки под прикреплённой шапкой: подсказка о похожей категории,
+    /// состояние, сетка на `columns` колонок и нога догрузки.
+    fn shelf<'a>(&'a self, cache: &'a PosterCache, columns: usize) -> Column<'a, Message> {
+        let mut body = Column::new().spacing(12);
 
         if let Some(related) = &self.related {
             body = body.push(widgets::muted(format!(
@@ -257,22 +269,23 @@ impl Browse {
         }
 
         if !self.releases.is_empty() {
-            body = body.push(widgets::poster_grid(cache, &self.releases, widgets::GRID_COLUMNS));
-        }
-
-        let footer = (!self.releases.is_empty()).then(|| {
-            widgets::shelf_tail(
+            body = body.push(widgets::poster_grid(cache, &self.releases, columns));
+            body = body.push(widgets::shelf_tail(
                 self.paging.loading_more,
                 self.paging.exhausted,
                 self.releases.len(),
-            )
-        });
+            ));
+        }
 
-        widgets::scroll_infinite(
-            body,
-            footer,
-            self.can_load_more() && !self.releases.is_empty(),
-        )
+        body
+    }
+
+    pub fn view<'a>(&'a self, cache: &'a PosterCache) -> Element<'a, Message> {
+        let more = self.can_load_more() && !self.releases.is_empty();
+
+        widgets::sticky_body(self.header(), more, move |size| {
+            self.shelf(cache, widgets::grid_columns_for(size.width))
+        })
     }
 }
 

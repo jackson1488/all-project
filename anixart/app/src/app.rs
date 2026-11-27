@@ -31,7 +31,7 @@ use anixart_core::{
 };
 use anixart_parsers::ParsedVideo;
 use iced::widget::{button, container, horizontal_space, vertical_space, Column, Row};
-use iced::{alignment, Element, Length, Task, Theme};
+use iced::{alignment, Element, Length, Size, Task, Theme};
 
 use crate::bookmarks::{BookmarkPage, Bookmarks};
 use crate::feed::Feed;
@@ -205,6 +205,10 @@ pub enum Message {
     SelectSource(usize),
     EpisodesLoaded(Result<Vec<Episode>, String>),
     PlayEpisode(usize),
+    /// Пилюля «Сначала 1-я / Сначала новая»: меняет направление списка серий.
+    /// Только перестановка рядов — `episodes`, `pending` и `playing` остаются
+    /// на своих местах ([`crate::release::ReleaseView::ordered_episodes`]).
+    ToggleEpisodeOrder,
     PlaybackResolved(Result<ParsedVideo, String>),
     /// Запись просмотренной серии в историю — фоновая, её отказ не мешает смотреть.
     HistoryRecorded(Result<(), String>),
@@ -278,12 +282,118 @@ fn collections_loaded(
     Message::BookmarkLoaded(tab, result.map(BookmarkPage::Collections))
 }
 
+/// Тело страницы коллекции: карточка с обложкой, сетка её релизов на `columns`
+/// колонок и кнопка возврата.
+///
+/// Отдельная функция, а не кусок [`App::collection_view`], потому что сетка
+/// строится уже после того, как [`iced::widget::responsive`] измерил зону: число
+/// колонок приходит извне, и собрать его параметром здесь понятнее, чем держать
+/// внутри замыкания.
+fn collection_body<'a>(
+    collection: &'a Collection,
+    cache: &'a PosterCache,
+    columns: usize,
+) -> Column<'a, Message> {
+    let key = posters::collection_key(collection.id);
+    let title = if collection.title.trim().is_empty() {
+        "Коллекция без названия".to_owned()
+    } else {
+        collection.title.trim().to_owned()
+    };
+    let cover = widgets::artwork(
+        cache,
+        &key,
+        &title,
+        widgets::HERO_POSTER_WIDTH,
+        widgets::HERO_POSTER_HEIGHT,
+    );
+
+    let author = collection
+        .creator
+        .as_ref()
+        .map(|creator| creator.login.trim())
+        .filter(|login| !login.is_empty())
+        .unwrap_or("Anixart");
+
+    let mut chips = vec![
+        author.to_owned(),
+        util::count_label(
+            collection.releases.len() as i64,
+            "релиз",
+            "релиза",
+            "релизов",
+        ),
+        util::count_label(
+            i64::from(collection.favorites_count),
+            "лайк",
+            "лайка",
+            "лайков",
+        ),
+        widgets::comments_label(collection.comment_count),
+        format!("Создана: {}", util::date_label(collection.creation_date)),
+    ];
+    if collection.is_private {
+        chips.push("Приватная".to_owned());
+    }
+
+    let description = collection.description.trim();
+    let mut facts = Column::new().spacing(8).width(Length::Fill);
+    facts = facts.push(widgets::headline_row(title));
+    if !description.is_empty() {
+        facts = facts.push(widgets::paragraph(description.to_owned()));
+    }
+    facts = facts
+        .push(widgets::chip_row(chips))
+        .push(widgets::divider());
+
+    let caption = format!(
+        "Релизы коллекции · {}",
+        util::count_label(
+            collection.releases.len() as i64,
+            "релиз",
+            "релиза",
+            "релизов"
+        )
+    );
+
+    let shelf: Element<'_, Message> = if collection.releases.is_empty() {
+        widgets::empty_state(
+            "В коллекции нет релизов".to_owned(),
+            "Добавляйте релизы из «Обзора» — при следующем открытии список \
+             заполнится сам."
+                .to_owned(),
+        )
+    } else {
+        widgets::poster_grid(cache, &collection.releases, columns)
+    };
+
+    Column::new()
+        .spacing(12)
+        .push(widgets::card(
+            Row::new()
+                .spacing(16)
+                .align_y(alignment::Vertical::Top)
+                .push(cover)
+                .push(facts),
+        ))
+        .push(widgets::section(caption, shelf))
+        .push(
+            Row::new()
+                .spacing(10)
+                .align_y(alignment::Vertical::Center)
+                .push(widgets::action("Назад", Some(Message::Back)))
+                .push(horizontal_space()),
+        )
+}
+
 /// Аргументы, с которыми стартует `mpv`, — вынесены отдельно от запуска, потому что
 /// ровно они и есть «лучшее качество, форсированное окно, русский заголовок»:
 ///
 /// * `--force-window=immediate` — окно показывается сразу, ещё до первой декады
 ///   кадров. Без него `mpv` на сетевой ссылке стартует в терминале, и пользователь
 ///   видит пустоту, пока буфер не наполнится.
+/// * `--no-terminal` — плеер не пишет статус-строки в терминал родителя: у окна
+///   их всё равно не видно, а засорённый лог мешался бы под отладкой.
 /// * `--title=<Релиз — Серия>` — заголовок окна и списка окон, поэтому серию
 ///   узнаёшь среди прочих приложений, не заглядывая в плеер. Пустая подпись не
 ///   рождает аргумента с голым тире.
@@ -296,7 +406,7 @@ pub fn mpv_arguments(video: &ParsedVideo, caption: &str) -> Result<Vec<String>, 
         .best_url()
         .ok_or_else(|| "Ни одной играбельной ссылки не найдено".to_owned())?;
 
-    let mut arguments = vec!["--force-window=immediate".to_owned()];
+    let mut arguments = vec!["--force-window=immediate".to_owned(), "--no-terminal".to_owned()];
     let title = caption.trim();
     if !title.is_empty() {
         arguments.push(format!("--title={title}"));
@@ -309,9 +419,15 @@ pub fn mpv_arguments(video: &ParsedVideo, caption: &str) -> Result<Vec<String>, 
 }
 
 /// Передача лучшей найденной ссылки внешнему процессу `mpv`.
+///
+/// Плеер стартует откреплённым: `stdin` закрыт, чтобы он не перехватывал клавиши
+/// терминала клиента, а `stdout` / `stderr` остаются унаследованными — там и
+/// пишется его собственная диагностика. Держать `Child` незачем, остановка
+/// просмотра — дело рук пользователя в окне `mpv`.
 pub fn play_with_mpv(video: &ParsedVideo, caption: &str) -> Result<(), String> {
     let mut command = Command::new("mpv");
     command.args(mpv_arguments(video, caption)?);
+    command.stdin(Stdio::null());
 
     command
         .spawn()
@@ -948,7 +1064,19 @@ impl App {
                 self.error = Some(error);
                 Task::none()
             }
+            Message::ToggleEpisodeOrder => {
+                // Порядок рядов — чистая визуальная перестановка: запросов нет,
+                // индексы не меняются, поэтому отсюда только перерисовка.
+                self.release.toggle_episode_order();
+                Task::none()
+            }
             Message::PlayEpisode(index) => {
+                // Одна ссылка уже в полёте: второе нажатие подняло бы второй процесс
+                // `mpv` поверх первого, поэтому запрос ждёт своего ответа.
+                if self.release.pending.is_some() {
+                    return Task::none();
+                }
+
                 let url = self
                     .release
                     .episode(index)
@@ -1550,6 +1678,11 @@ impl App {
     }
 
     /// Страница коллекции: карточка с обложкой и сетка её релизов.
+    ///
+    /// Тело строится [`widgets::responsive_body`], поэтому сетка берёт столько
+    /// колонок, сколько действительно вмещает измеренная зона, а не константные
+    /// четыре. Догрузка здесь не нужна: `/collection/{id}` отвечает всеми своими
+    /// релизами одним запросом.
     fn collection_view<'a>(&'a self, cache: &'a PosterCache) -> Element<'a, Message> {
         if self.collection_loading {
             return widgets::scroll_body(
@@ -1568,98 +1701,9 @@ impl App {
             )));
         };
 
-        let key = posters::collection_key(collection.id);
-        let title = if collection.title.trim().is_empty() {
-            "Коллекция без названия".to_owned()
-        } else {
-            collection.title.trim().to_owned()
-        };
-        let cover = widgets::artwork(
-            cache,
-            &key,
-            &title,
-            widgets::HERO_POSTER_WIDTH,
-            widgets::HERO_POSTER_HEIGHT,
-        );
-
-        let author = collection
-            .creator
-            .as_ref()
-            .map(|creator| creator.login.trim())
-            .filter(|login| !login.is_empty())
-            .unwrap_or("Anixart");
-
-        let mut chips = vec![
-            author.to_owned(),
-            util::count_label(
-                collection.releases.len() as i64,
-                "релиз",
-                "релиза",
-                "релизов",
-            ),
-            util::count_label(
-                i64::from(collection.favorites_count),
-                "лайк",
-                "лайка",
-                "лайков",
-            ),
-            widgets::comments_label(collection.comment_count),
-            format!("Создана: {}", util::date_label(collection.creation_date)),
-        ];
-        if collection.is_private {
-            chips.push("Приватная".to_owned());
-        }
-
-        let description = collection.description.trim();
-        let mut facts = Column::new().spacing(8).width(Length::Fill);
-        facts = facts.push(widgets::headline_row(title));
-        if !description.is_empty() {
-            facts = facts.push(widgets::paragraph(description.to_owned()));
-        }
-        facts = facts
-            .push(widgets::chip_row(chips))
-            .push(widgets::divider());
-
-        let shelf = if collection.releases.is_empty() {
-            widgets::empty_state(
-                "В коллекции нет релизов".to_owned(),
-                "Добавляйте релизы из «Обзора» — при следующем открытии список \
-                 заполнится сам."
-                    .to_owned(),
-            )
-        } else {
-            widgets::poster_grid(cache, &collection.releases, widgets::GRID_COLUMNS)
-        };
-
-        let caption = format!(
-            "Релизы коллекции · {}",
-            util::count_label(
-                collection.releases.len() as i64,
-                "релиз",
-                "релиза",
-                "релизов"
-            )
-        );
-
-        let body = Column::new()
-            .spacing(12)
-            .push(widgets::card(
-                Row::new()
-                    .spacing(16)
-                    .align_y(alignment::Vertical::Top)
-                    .push(cover)
-                    .push(facts),
-            ))
-            .push(widgets::section(caption, shelf))
-            .push(
-                Row::new()
-                    .spacing(10)
-                    .align_y(alignment::Vertical::Center)
-                    .push(widgets::action("Назад", Some(Message::Back)))
-                    .push(horizontal_space()),
-            );
-
-        widgets::scroll_body(body)
+        widgets::responsive_body(false, move |size: Size| {
+            collection_body(collection, cache, widgets::grid_columns_for(size.width))
+        })
     }
 
     /// Навигационная панель: четыре корневых раздела, возврат и выход.

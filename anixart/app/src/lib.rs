@@ -360,14 +360,22 @@ mod app_tests {
             .with_header("Referer", "https://kodik.info/");
 
         let arguments = mpv_arguments(&video, "Наруто — №12 · Битва за Коноху").unwrap();
-        assert_eq!(arguments[0], "--force-window=immediate");
-        assert_eq!(arguments[1], "--title=Наруто — №12 · Битва за Коноху");
-        assert_eq!(arguments[2], "https://kodik.example/1.mp4");
-        assert_eq!(arguments[3], "--http-header-fields=Referer: https://kodik.info/");
+        assert_eq!(
+            arguments,
+            vec![
+                "--force-window=immediate".to_owned(),
+                "--no-terminal".to_owned(),
+                "--title=Наруто — №12 · Битва за Коноху".to_owned(),
+                "https://kodik.example/1.mp4".to_owned(),
+                "--http-header-fields=Referer: https://kodik.info/".to_owned(),
+            ],
+            "окно форсируется, терминал молчит, заголовки хоста при делеге"
+        );
 
         // пустая подпись не рождает голого тире в заголовке окна
         let arguments = mpv_arguments(&video, "   ").unwrap();
-        assert_eq!(arguments[1], "https://kodik.example/1.mp4");
+        assert_eq!(arguments[2], "https://kodik.example/1.mp4");
+        assert!(arguments.iter().all(|argument| !argument.contains("--title=")));
     }
 
     #[test]

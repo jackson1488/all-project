@@ -11,9 +11,18 @@
 //! on whether «7,8» is printed with a comma.
 //!
 //! Three shelves — «Главная», «Обзор», «Закладки» — are endless lists of posters,
-//! and none of them has page buttons: [`scroll_infinite`] watches the viewport and
-//! fires the load-more message when the user reaches [`SCROLL_TRIGGER`], the same
-//! «догружаем у конца» that the official client does with its `NestedScrollView`.
+//! and none of them has page buttons: [`sticky_body`] with `more = true` watches
+//! the viewport and fires the load-more message when the user reaches
+//! [`SCROLL_TRIGGER`], the same «догружаем у конца» that the official client does
+//! with its `NestedScrollView`. The same helper pins the tab row of a shelf to the
+//! top of the window, so scrolling never carries the pills away.
+//!
+//! A shelf is built inside [`iced::widget::responsive`], which hands the screen the
+//! real size of its zone before the tree is composed. That is what lets
+//! [`poster_grid`] stretch: the number of columns comes from
+//! [`grid_columns_for`] — the measured width minus [`BODY_PADDING_X`] — and every
+//! tile takes an equal [`Length::FillPortion`] of the row instead of a card of a
+//! fixed pixel width.
 //!
 //! Two iced 0.13 constraints shape the code:
 //!
@@ -27,18 +36,21 @@
 
 use anixart_core::{Collection, EpisodeType, Release};
 use iced::widget::scrollable::Viewport;
-use iced::widget::{button, container, scrollable, text, Column, Row, Text};
-use iced::{alignment, Element, Length};
+use iced::widget::{button, container, responsive, scrollable, text, Column, Row, Text};
+use iced::{alignment, Element, Length, Size};
 
 use crate::app::Message;
 use crate::posters::{self, PosterCache};
 use crate::theme;
 use crate::util;
 
-/// Width of a poster tile in a grid, including its padding.
-pub const TILE_WIDTH: u16 = 176;
-/// Height of the artwork inside a tile.
-pub const TILE_POSTER_HEIGHT: u16 = 232;
+/// Narrowest poster tile a grid keeps in a column, padding included. A wider
+/// window does not add pixels to the card — it adds columns, and the row then
+/// shares what is left between them, so a tile is *at least* this wide.
+pub const TILE_WIDTH: u16 = 210;
+/// Height of the artwork inside a tile. The width of the box stretches with the
+/// column, the height does not: a shelf of rows must stay readable at a glance.
+pub const TILE_POSTER_HEIGHT: u16 = 280;
 /// Width of the artwork on the release page.
 pub const HERO_POSTER_WIDTH: u16 = 224;
 /// Height of the artwork on the release page.
@@ -261,6 +273,25 @@ pub fn pill<'a>(caption: String, active: bool, message: Message) -> Element<'a, 
         .into()
 }
 
+/// Пилюля-переключатель: в отличие от [`pill`] она нажимается всегда, потому что
+/// её «активность» — это состояние, а не выбранная вкладка. Так на экране
+/// источников работает «Сначала 1-я / Сначала новая»: подсветка показывает
+/// порядок, нажатие его меняет.
+pub fn toggle_pill<'a>(caption: String, active: bool, message: Message) -> Element<'a, Message> {
+    let style: fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style =
+        if active {
+            theme::styles::pill_active
+        } else {
+            theme::styles::pill
+        };
+
+    button(button_label(caption, 14))
+        .padding([8, 16])
+        .style(style)
+        .on_press(message)
+        .into()
+}
+
 /// Primary action button — «Искать», «Смотреть», «В список». It carries the
 /// accent fill, so unlike a pill it is never drawn as "selected": an inert one
 /// (`None`) simply cannot be pressed, which is how a loading screen disables
@@ -311,7 +342,16 @@ pub fn section<'a>(
         .into()
 }
 
+/// Horizontal padding of a screen body — the `[16, 20]` the scrollable columns are
+/// built with, counted twice. [`grid_columns_for`] subtracts it from a measured
+/// width, so a grid never promises a column that the rails would eat.
+pub const BODY_PADDING_X: f32 = 40.0;
+
 /// The scrollable body of a screen: full width, thin rails.
+///
+/// A screen that shows a poster grid should prefer [`responsive_body`] instead:
+/// this one lays its content out before anyone knows how wide the window is, so
+/// its grid has to fall back on the [`GRID_COLUMNS`] constant.
 pub fn scroll_body<'a>(content: Column<'a, Message>) -> Element<'a, Message> {
     scrollable(
         content
@@ -325,41 +365,79 @@ pub fn scroll_body<'a>(content: Column<'a, Message>) -> Element<'a, Message> {
     .into()
 }
 
-/// Scrollable body of an *endless* shelf.
+/// Columns of a poster grid inside a body of the measured `width`.
 ///
-/// Same rails and padding as [`scroll_body`], plus two things the page buttons
-/// used to do: a `footer` line under the last row, and — while `more` is `true` —
-/// an `on_scroll` notification that turns the viewport offset into
-/// [`Message::Scrolled`](crate::app::Message::Scrolled). The app compares that
-/// offset with [`reached_end`] and asks for the next page, so a shelf grows by
-/// scrolling and never by a «Вперёд» button.
-///
-/// `more` is switched off once the shelf knows it is done: an exhausted shelf
-/// raises no notifications at all, which is the only cheap way to stop asking the
-/// endpoint for pages it has already answered with nothing.
-pub fn scroll_infinite<'a>(
-    content: Column<'a, Message>,
-    footer: Option<Element<'a, Message>>,
-    more: bool,
-) -> Element<'a, Message> {
-    let mut column = content
-        .spacing(14)
-        .padding([16, 20])
-        .width(Length::Fill);
-    if let Some(footer) = footer {
-        column = column.push(footer);
-    }
+/// The width is the one [`responsive`] reports — the whole zone, rails included —
+/// so [`BODY_PADDING_X`] comes off before the tiles are counted.
+pub fn grid_columns_for(width: f32) -> usize {
+    grid_columns(width - BODY_PADDING_X, GRID_GAP)
+}
 
-    let mut body = scrollable(column)
+/// Scrollable body that is built *after* its zone has been measured.
+///
+/// [`responsive`] hands the closure the size of the region the screen actually got
+/// — window minus the navigation rail, minus banners, minus a pinned header — so
+/// the caller can lay out whole rows instead of guessing. The closure is run again
+/// whenever that size changes, which is what makes a shelf re-column itself live
+/// while the window is dragged wider.
+///
+/// `more` is the endless-shelf switch: while it is `true` the scrollable reports
+/// its offset through [`Message::Scrolled`](crate::app::Message::Scrolled), and
+/// the app compares that offset with [`reached_end`] and asks for the next page.
+/// A shelf that knows it is done switches it off, which is the only cheap way to
+/// stop asking the endpoint for pages it already answered with nothing.
+pub fn responsive_body<'a, F>(more: bool, body: F) -> Element<'a, Message>
+where
+    F: Fn(Size) -> Column<'a, Message> + 'a,
+{
+    responsive(move |size: Size| {
+        let column = body(size)
+            .spacing(14)
+            .padding([16, 20])
+            .width(Length::Fill);
+
+        let mut shelf = scrollable(column)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(theme::styles::scroll);
+
+        if more {
+            shelf = shelf.on_scroll(|viewport: Viewport| {
+                Message::Scrolled(viewport.relative_offset().y)
+            });
+        }
+
+        shelf.into()
+    })
+    .into()
+}
+
+/// Scrollable body of an *endless* shelf whose header does not scroll.
+///
+/// The `header` — tab pills, a search field, the row of sources — is pinned to the
+/// top of the zone: the screen is a column of two children, a shrink-to-fit header
+/// and a [`responsive_body`] that takes everything below it. Scrolling therefore
+/// carries posters past the pills and never the pills themselves, and the body
+/// still learns its own width for the grid.
+///
+/// The header is painted on [`theme::styles::surface`] and shares the horizontal
+/// padding of the body, so the two lines up even though only one of them moves.
+pub fn sticky_body<'a, F>(header: Element<'a, Message>, more: bool, body: F) -> Element<'a, Message>
+where
+    F: Fn(Size) -> Column<'a, Message> + 'a,
+{
+    Column::new()
+        .spacing(0)
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(theme::styles::scroll);
-
-    if more {
-        body = body.on_scroll(|viewport: Viewport| Message::Scrolled(viewport.relative_offset().y));
-    }
-
-    body.into()
+        .push(
+            container(header)
+                .padding([12, 20])
+                .width(Length::Fill)
+                .style(theme::styles::surface),
+        )
+        .push(responsive_body(more, body))
+        .into()
 }
 
 /// Низ бесконечной полки: чем она закончилась, тем она и говорит.
@@ -471,6 +549,12 @@ pub fn note<'a>(caption: String, tone: Tone) -> Element<'a, Message> {
 /// card is the button, so a wall of covers reads as a catalogue rather than as a
 /// list of links.
 ///
+/// The tile is a [`Length::FillPortion`] of its row: [`poster_grid`] gives every
+/// card of a full row the same share of the measured width, so a shelf spans the
+/// window instead of leaving a strip of empty wall on the right. Only the artwork
+/// *height* stays a constant ([`TILE_POSTER_HEIGHT`]) — rows of a shelf have to
+/// line up.
+///
 /// The caption under the poster is what the official home card says: year, rating,
 /// how many series are out, the catalogue status and, when the backend bothered to
 /// fill it, the synopsis. A shelf of 25 tiles therefore answers «что это за релиз»
@@ -478,12 +562,12 @@ pub fn note<'a>(caption: String, tone: Tone) -> Element<'a, Message> {
 pub fn release_tile<'a>(cache: &PosterCache, release: &Release) -> Element<'a, Message> {
     let key = posters::release_key(release.id);
     let title = release_title(release);
-    let artwork = posters::poster_element(
+    let artwork = posters::poster_box(
         cache.peek(&key),
         &key,
         &title,
-        TILE_WIDTH - 24,
-        TILE_POSTER_HEIGHT,
+        Length::Fill,
+        Length::Fixed(f32::from(TILE_POSTER_HEIGHT)),
     );
 
     let status = release
@@ -528,7 +612,7 @@ pub fn release_tile<'a>(cache: &PosterCache, release: &Release) -> Element<'a, M
     }
 
     button(body.padding(12))
-        .width(Length::Fixed(f32::from(TILE_WIDTH)))
+        .width(Length::FillPortion(1))
         .style(theme::styles::card_button)
         .on_press(Message::OpenRelease(release.id))
         .into()
@@ -548,48 +632,60 @@ pub fn artwork<'a>(
 
 /// Gap between the tiles of a poster grid, both ways.
 pub const GRID_GAP: f32 = 12.0;
-/// Default number of tiles per row when the window size is unknown.
+/// Number of tiles per row when the zone was never measured — the fallback of the
+/// screens that still build their body with [`scroll_body`]. A measured shelf asks
+/// [`grid_columns_for`] instead and gets as many columns as the window really fits.
 pub const GRID_COLUMNS: usize = 4;
 
-/// How many tiles fit in a window of the given width, at least one.
+/// How many tiles of at least [`TILE_WIDTH`] fit in a zone of the given width,
+/// at least one.
 ///
-/// The grid is laid out in whole rows of [`TILE_WIDTH`] tiles, so a narrow window
-/// simply gets fewer columns instead of squeezed posters.
+/// A narrow window therefore loses columns instead of squeezing posters, and the
+/// leftovers of a wide one are shared back by [`poster_grid`], whose rows span the
+/// whole zone.
 pub fn grid_columns(width: f32, gap: f32) -> usize {
     let tile = f32::from(TILE_WIDTH) + gap;
     (((width - gap) / tile).floor() as usize).max(1)
 }
 
-/// The release tiles laid out `columns` per row.
+/// The release tiles laid out `columns` per row, edge to edge.
 ///
-/// iced 0.13 has no grid widget, so the rows are built from index ranges: a short
-/// last row is padded with invisible spacers, which keeps every column the same
-/// width instead of stretching the tail tiles.
+/// iced 0.13 has no grid widget, so the rows are built from index ranges. Every
+/// row fills the width it is given and every tile takes an equal
+/// [`Length::FillPortion`] of it, which is what makes a shelf reach the right edge
+/// of the window at any width; a short last row is padded with invisible
+/// placeholders of the same portion, so its tiles stay the width of the columns
+/// above instead of stretching across the tail.
 pub fn poster_grid<'a>(
     cache: &PosterCache,
     releases: &[Release],
     columns: usize,
 ) -> Element<'a, Message> {
     let columns = columns.max(1);
-    let mut rows = Column::new().spacing(GRID_GAP);
+    let mut rows = Column::new().spacing(GRID_GAP).width(Length::Fill);
 
     for (start, end) in chunk(releases.len(), columns) {
-        let mut row = Row::new().spacing(GRID_GAP);
+        let mut row = Row::new().spacing(GRID_GAP).width(Length::Fill);
         for release in &releases[start..end] {
             row = row.push(release_tile(cache, release));
         }
-        // the spacers only hold the column widths, they never draw anything
+        // the placeholders only hold the column widths, they never draw anything
         for _ in end..start + columns {
-            row = row.push(
-                container(text(""))
-                    .width(Length::Fixed(f32::from(TILE_WIDTH)))
-                    .height(Length::Shrink),
-            );
+            row = row.push(grid_placeholder());
         }
         rows = rows.push(row);
     }
 
     rows.into()
+}
+
+/// Пустая колонка хвостового ряда: та же доля ширины, что у соседней плитки, но
+/// ни текста, ни фона — ряд ниже по списку не съезжает.
+fn grid_placeholder<'a>() -> Element<'a, Message> {
+    container(text(""))
+        .width(Length::FillPortion(1))
+        .height(Length::Shrink)
+        .into()
 }
 
 /// A collection row of the «Коллекции» tab: cover, title, author and two counters.
@@ -734,20 +830,30 @@ mod tests {
     }
 
     #[test]
-    fn the_shelf_tail_and_the_infinite_body_build_headlessly() {
+    fn the_shelf_tail_and_the_pinned_bodies_build_headlessly() {
         // Никакого рендера не нужно, чтобы собрать дерево: проверка, что нога полки
-        // и бесконечное тело строятся без паники во всех трёх состояниях — загрузка,
-        // конец выборки, «ещё есть куда идти».
+        // и оба вида тела — прикреплённое и просто отзывчивое — строятся без паники
+        // во всех трёх состояниях: загрузка, конец выборки, «ещё есть куда идти».
         let _loading = shelf_tail(true, false, 25);
         let _end = shelf_tail(false, true, 48);
         let _more = shelf_tail(false, false, 25);
 
-        let _no_footer = scroll_infinite(Column::new().push(container(text("25 плиток"))), None, true);
-        let _with_footer = scroll_infinite(
-            Column::new().push(container(text("48 плиток"))),
-            Some(shelf_tail(false, true, 48)),
-            false,
-        );
+        let header = container(text("Полки каталога")).into();
+
+        let _pinned = sticky_body(header, true, |size: Size| {
+            let columns = grid_columns_for(size.width);
+            Column::new().push(container(text(format!("{columns} колонок плиток")))
+                .width(Length::Fill))
+        });
+
+        let _shelf = responsive_body(false, |size: Size| {
+            Column::new().push(container(text(format!(
+                "тело шириной {}",
+                size.width
+            )))
+            .width(Length::Fill))
+        });
+
         let _plain = scroll_body(Column::new().push(container(text("обычный экран"))));
     }
 
@@ -830,9 +936,9 @@ mod tests {
 
     #[test]
     fn grid_columns_count_whole_tiles_and_never_drop_below_one() {
-        // 1024 px at 176 + 12 gives five columns, 620 px the minimum window gives three
-        assert_eq!(grid_columns(1024.0, GRID_GAP), 5);
-        assert_eq!(grid_columns(620.0, GRID_GAP), 3);
+        // 1024 px при плитке 210 + 12 дают четыре колонки, 620 px минимального окна — две
+        assert_eq!(grid_columns(1024.0, GRID_GAP), 4);
+        assert_eq!(grid_columns(620.0, GRID_GAP), 2);
         assert_eq!(grid_columns(200.0, GRID_GAP), 1);
         assert_eq!(grid_columns(0.0, GRID_GAP), 1);
         assert_eq!(grid_columns(-500.0, GRID_GAP), 1);
@@ -842,6 +948,27 @@ mod tests {
         // measurement still lays out like the window it ships in
         assert!((2..=grid_columns(1024.0, GRID_GAP)).contains(&GRID_COLUMNS));
         assert_eq!(GRID_GAP, 12.0);
+
+        // каждая следующая колонка открывается, только когда плитке хватает её ширины
+        assert_eq!(grid_columns(2 * TILE_WIDTH as f32 + 3.0 * GRID_GAP, GRID_GAP), 2);
+        assert_eq!(
+            grid_columns(2 * TILE_WIDTH as f32 + 2.0 * GRID_GAP, GRID_GAP),
+            1,
+            "ровно двух плиток без второго зазора не хватает на две колонки"
+        );
+
+        // тело экрана отмеряется без паддингов: grid_columns_for их вычитает
+        assert_eq!(grid_columns_for(1024.0 + BODY_PADDING_X), grid_columns(1024.0, GRID_GAP));
+        assert_eq!(grid_columns_for(BODY_PADDING_X), 1, "узкая зона — одна колонка");
+        assert_eq!(grid_columns_for(0.0), 1);
+    }
+
+    #[test]
+    fn a_toggle_pill_is_pressable_in_both_states() {
+        // Вкладка (`pill`) теряет нажатие, когда она уже выбрана, а переключатель
+        // обязан нажиматься всегда: иначе «Сначала новая» нельзя вернуть назад.
+        let _off = toggle_pill("Сначала 1-я".to_owned(), false, Message::ToggleEpisodeOrder);
+        let _on = toggle_pill("Сначала новая".to_owned(), true, Message::ToggleEpisodeOrder);
     }
 
     #[test]
@@ -887,6 +1014,8 @@ mod tests {
     #[test]
     #[allow(clippy::assertions_on_constants)]
     fn tile_dimensions_leave_room_for_the_padding() {
+        assert_eq!(TILE_WIDTH, 210, "плитка стала крупнее: 176 px на полке читались мелко");
+        assert_eq!(TILE_POSTER_HEIGHT, 280);
         assert!(TILE_WIDTH > 24, "the tile padding must not eat the artwork");
         assert!(TILE_POSTER_HEIGHT > TILE_WIDTH);
         assert!(HERO_POSTER_WIDTH > TILE_WIDTH - 24);

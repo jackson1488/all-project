@@ -14,7 +14,9 @@ anixart-parsers = { path = "../parsers" }
 # winit 0.30 enables both Linux backends by default, so `tokio` is all we need.
 # The `image` feature unlocks `iced::widget::image`, which the poster cards of the
 # Material-dark UI render from the in-memory cache of [`anixart_app::posters`].
-iced = { version = "0.13", features = ["tokio", "image"] }
+# The `lazy` feature unlocks `iced::widget::responsive`, the only way a shelf can
+# learn the real width of its zone and lay out as many poster columns as fit in it.
+iced = { version = "0.13", features = ["tokio", "image", "lazy"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 # Posters are validated with the very `image` crate iced's `image` feature pulls in
 # (the features unify, so no second copy is built): a truncated download would be

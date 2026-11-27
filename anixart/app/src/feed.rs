@@ -118,7 +118,11 @@ impl Feed {
         )
     }
 
-    pub fn view<'a>(&'a self, cache: &'a PosterCache) -> Element<'a, Message> {
+    /// Шапка полки: заголовок текущей пилюли и ряд самих пилюль.
+    ///
+    /// Она прикреплена к верху зоны и в прокрутку не уходит — переключиться на
+    /// другую полку можно, не долистывая стену постеров обратно.
+    fn header<'a>(&'a self) -> Element<'a, Message> {
         let pills = FeedCategory::ALL.iter().fold(Row::new().spacing(8), |row, category| {
             row.push(widgets::pill(
                 category.label().to_owned(),
@@ -127,9 +131,17 @@ impl Feed {
             ))
         });
 
-        let mut body = Column::new()
-            .spacing(12)
-            .push(widgets::section("Полки каталога".to_owned(), pills.wrap()));
+        Column::new()
+            .spacing(10)
+            .push(widgets::subhead(self.shelf_title()))
+            .push(widgets::section("Полки каталога".to_owned(), pills.wrap()))
+            .into()
+    }
+
+    /// Тело полки под прикреплённой шапкой: состояние, сетка на `columns` колонок
+    /// и нога, которая просит следующую страницу.
+    fn shelf<'a>(&'a self, cache: &'a PosterCache, columns: usize) -> Column<'a, Message> {
+        let mut body = Column::new().spacing(12);
 
         if self.paging.loading {
             body = body.push(widgets::busy(format!("Загрузка: «{}»", self.category)));
@@ -140,22 +152,23 @@ impl Feed {
         }
 
         if !self.releases.is_empty() {
-            body = body.push(widgets::poster_grid(cache, &self.releases, widgets::GRID_COLUMNS));
-        }
-
-        let footer = (!self.releases.is_empty()).then(|| {
-            widgets::shelf_tail(
+            body = body.push(widgets::poster_grid(cache, &self.releases, columns));
+            body = body.push(widgets::shelf_tail(
                 self.paging.loading_more,
                 self.paging.exhausted,
                 self.releases.len(),
-            )
-        });
+            ));
+        }
 
-        widgets::scroll_infinite(
-            body,
-            footer,
-            self.can_load_more() && !self.releases.is_empty(),
-        )
+        body
+    }
+
+    pub fn view<'a>(&'a self, cache: &'a PosterCache) -> Element<'a, Message> {
+        let more = self.can_load_more() && !self.releases.is_empty();
+
+        widgets::sticky_body(self.header(), more, move |size| {
+            self.shelf(cache, widgets::grid_columns_for(size.width))
+        })
     }
 }
 

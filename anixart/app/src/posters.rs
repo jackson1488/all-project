@@ -289,6 +289,26 @@ pub fn poster_element<'a>(
     width: u16,
     height: u16,
 ) -> iced::Element<'a, crate::app::Message> {
+    poster_box(
+        handle,
+        key,
+        title,
+        iced::Length::Fixed(f32::from(width)),
+        iced::Length::Fixed(f32::from(height)),
+    )
+}
+
+/// The same box, but sized by [`Length`]: the tiles of a responsive grid stretch
+/// across their column, so their artwork is `Fill` wide and only as tall as the
+/// row asks. Everything else about the box — the tint, the letter, the rounded
+/// corners, the `Cover` crop — is identical to [`poster_element`].
+pub fn poster_box<'a>(
+    handle: Option<&Handle>,
+    key: &str,
+    title: &str,
+    width: iced::Length,
+    height: iced::Length,
+) -> iced::Element<'a, crate::app::Message> {
     use iced::widget::{center, container, text, Image};
     use iced::{Background, Element, Length};
 

@@ -19,7 +19,15 @@
 //!
 //! Индексы в [`ReleaseView::types`] всегда настоящие позиции ответа сервера:
 //! фильтр вариантов только скрывает ряды, поэтому [`Message::SelectType`]
-//! (crate::app::Message::SelectType) не переномеровывается.
+//! (crate::app::Message::SelectType) не переномеровывается. Тот же закон держит
+//! список серий: [`ReleaseView::ordered_episodes`] только переставляет ряды по
+//! [`EpisodeOrder`], а [`Message::PlayEpisode`] (crate::app::Message::PlayEpisode)
+//! носит индекс вектора `episodes`, а не место на экране.
+//!
+//! Экран источников построен [`widgets::sticky_body`]: шапка с возвратом к
+//! озвучкам, пилюлями видеохостингов и переключателем «Сначала 1-я / Сначала
+//! новая» прикреплена к верху зоны, а под ней — [`iced::widget::responsive`] тело,
+//! которое знает свою ширину и поэтому отдаёт ряды серий во всю его длину.
 //!
 //! Ответы сервера о смене статуса и избранного отражаются локально
 //! ([`ReleaseView::apply_status`] / [`ReleaseView::apply_favorite`]) и проверяются
@@ -35,6 +43,40 @@ use crate::lists::{ReleaseStatus, VariantFilter, WatchStatus};
 use crate::posters::{self, PosterCache};
 use crate::util;
 use crate::widgets;
+
+/// Порядок серий на экране источников.
+///
+/// Backend отдаёт серии как попало: у одного видеохостинга первой идёт свежая,
+/// у другого — наоборот, а `position` иногда нулевой. Экран поэтому не полагается
+/// на порядок ответа и сортирует сам, а пилюля в прикреплённой шапке выбирает
+/// направление.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EpisodeOrder {
+    /// По возрастанию номера: сначала первая серия.
+    #[default]
+    First,
+    /// По убыванию: свежая выпущенная серия наверху.
+    Newest,
+}
+
+impl EpisodeOrder {
+    /// Русская подпись пилюли-переключателя — она же состояние порядка в заголовке
+    /// списка серий.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::First => "Сначала 1-я",
+            Self::Newest => "Сначала новая",
+        }
+    }
+
+    /// Противоположный порядок: ровно то, что делает нажатие на пилюлю.
+    pub fn toggled(self) -> Self {
+        match self {
+            Self::First => Self::Newest,
+            Self::Newest => Self::First,
+        }
+    }
+}
 
 /// Куда отступает «Назад» на текущей ступени спуска.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,6 +106,8 @@ pub struct ReleaseView {
     pub selected_source: Option<usize>,
     pub episodes: Vec<Episode>,
     pub loading_episodes: bool,
+    /// Направление сортировки списка серий, выбранное пилюлей в шапке источников.
+    pub episode_order: EpisodeOrder,
     pub pending: Option<usize>,
     pub playing: Option<usize>,
     /// `false` у гостя: кнопки списков становятся неактивными, а не ошибкой.
@@ -132,7 +176,44 @@ impl ReleaseView {
         self.episodes.get(index)
     }
 
-    /// Подпись серии — такая же, как на её пилюле, и ровно та, что попадает
+    /// Номер серии, по которому строится сортировка: настоящее `position` ответа
+    /// сервера, а если его не пришло — место в исходном списке. Тот же закон, что
+    /// у подписи ряда.
+    fn episode_sort_key(&self, index: usize) -> i32 {
+        match self.episodes.get(index) {
+            Some(episode) if episode.position > 0 => episode.position,
+            _ => index as i32 + 1,
+        }
+    }
+
+    /// Индексы серий в выбранном порядке.
+    ///
+    /// Список только переставляется: `self.episodes` не меняется, поэтому
+    /// [`Message::PlayEpisode`] носит настоящий индекс вектора, а не место ряда на
+    /// экране, и `pending` / `playing` переживают переключение порядка. Равные
+    /// номера остаются в порядке ответа сервера — сортировка устойчива.
+    pub fn ordered_episodes(&self) -> Vec<usize> {
+        let mut indices: Vec<usize> = (0..self.episodes.len()).collect();
+        indices.sort_by(|left, right| {
+            let (first, second) = (
+                self.episode_sort_key(*left),
+                self.episode_sort_key(*right),
+            );
+            let by_number = match self.episode_order {
+                EpisodeOrder::First => first.cmp(&second),
+                EpisodeOrder::Newest => second.cmp(&first),
+            };
+            by_number.then(left.cmp(right))
+        });
+        indices
+    }
+
+    /// Меняет направление списка серий.
+    pub fn toggle_episode_order(&mut self) {
+        self.episode_order = self.episode_order.toggled();
+    }
+
+    /// Подпись серии — такая же, как на её ряду, и ровно та, что попадает
     /// в заголовок окна `mpv`.
     pub fn episode_label(&self, index: usize) -> Option<String> {
         self.episodes
@@ -173,6 +254,10 @@ impl ReleaseView {
     }
 
     /// Сбрасывает спуск при открытии другого релиза.
+    ///
+    /// Порядок серий (`episode_order`) намеренно переживает сброс: это привычка
+    /// просмотра, а не часть спуска по озвучке — её пилюля стоит в шапке источника
+    /// и должна оставаться выбранной, пока пользователь листает релизы.
     pub fn reset(&mut self) {
         self.types.clear();
         self.selected_type = None;
@@ -303,37 +388,90 @@ impl ReleaseView {
     /// Отдельный экран «Источники и серии» выбранной озвучки.
     ///
     /// Он открывается из списка озвучек и закрывается назад к нему же, поэтому
-    /// верхней пилюлей стоит «← Назад к озвучкам», а не «Назад к полке».
+    /// в шапке стоит «← Назад к озвучкам». Сама шапка — возврат, ряд пилюль
+    /// источников и пилюля-переключатель порядка серий — прикреплена к верху зоны
+    /// и в прокрутку не уходит: серий у длинного тайтла бывают сотни, и ни возврат,
+    /// ни выбор видеохостинга, ни «Сначала 1-я / Сначала новая» не должны уезжать
+    /// вместе с ними. Тело под шапкой отмеряется [`iced::widget::responsive`],
+    /// поэтому ряды серий идут во всю ширину окна.
     pub fn sources_view<'a>(&'a self, _cache: &'a PosterCache) -> Element<'a, Message> {
+        widgets::sticky_body(self.sources_header(), false, move |_| self.sources_body())
+    }
+
+    /// Прикреплённая шапка экрана источников.
+    fn sources_header<'a>(&'a self) -> Element<'a, Message> {
         let heading = match (self.title(), self.type_name()) {
             (Some(title), Some(kind)) => format!("{title} · {kind}"),
             (Some(title), None) => title,
             _ => "Источники и серии".to_owned(),
         };
 
-        let mut body = Column::new()
-            .spacing(12)
-            .push(widgets::section(
-                heading,
-                widgets::action("← Назад к озвучкам", Some(Message::ReleaseBack)),
+        let top = Row::new()
+            .spacing(10)
+            .align_y(alignment::Vertical::Center)
+            .push(
+                button(widgets::button_label("← Назад к озвучкам", 14))
+                    .padding([8, 16])
+                    .style(crate::theme::styles::ghost)
+                    .on_press(Message::ReleaseBack),
+            )
+            .push(widgets::headline_row(heading))
+            .push(widgets::toggle_pill(
+                self.episode_order.label().to_owned(),
+                self.episode_order == EpisodeOrder::Newest,
+                Message::ToggleEpisodeOrder,
             ));
+
+        let mut header = Column::new().spacing(10).push(top);
+
+        if !self.sources.is_empty() {
+            let pills = self
+                .sources
+                .iter()
+                .enumerate()
+                .fold(Row::new().spacing(8), |row, (index, source)| {
+                    row.push(widgets::pill(
+                        source.name.trim().to_owned(),
+                        self.selected_source == Some(index),
+                        Message::SelectSource(index),
+                    ))
+                });
+            header = header.push(widgets::section(
+                format!(
+                    "Источники · {}",
+                    util::count_label(
+                        self.sources.len() as i64,
+                        "видеохостинг",
+                        "видеохостинга",
+                        "видеохостингов"
+                    )
+                ),
+                pills.wrap(),
+            ));
+        }
+
+        header.into()
+    }
+
+    /// Тело экрана источников: пока источник не выбран — подробный список с
+    /// числами серий, выбранный — серии во всю ширину зоны.
+    fn sources_body<'a>(&'a self) -> Column<'a, Message> {
+        let body = Column::new().spacing(12);
 
         if self.types.is_empty() && !self.loading_types {
-            body = body.push(widgets::empty_state(
+            return body.push(widgets::empty_state(
                 "Озвучек у релиза нет".to_owned(),
                 "Вернитесь к озвучкам и выберите другой релиз: без вариантов озвучки \
-                 источникам и сериям взяться негде.".to_owned(),
+                 источникам и сериям взяться негде."
+                    .to_owned(),
             ));
-            return widgets::scroll_body(body);
         }
 
-        body = body.push(sources(self));
-
-        if self.selected_source.is_some() {
-            body = body.push(episodes(self));
+        if self.selected_source.is_none() {
+            return body.push(sources(self));
         }
 
-        widgets::scroll_body(body)
+        body.push(episodes(self))
     }
 }
 
@@ -660,11 +798,19 @@ fn sources(view: &ReleaseView) -> Element<'_, Message> {
     widgets::section(caption, rows)
 }
 
-/// Серии выбранного источника — ряд пилюль, потому что их бывает несколько сотен.
+/// Серии выбранного источника — список во всю ширину зоны, отсортированный по
+/// номеру серии.
+///
+/// Ряды строятся по индексам [`ReleaseView::ordered_episodes`], поэтому пилюля
+/// «Смотреть» несёт настоящий индекс `self.episodes`, а не место ряда на экране:
+/// переключение порядка не роняет ни `pending`, ни `playing`, ни заголовок окна
+/// `mpv`. Пока решатель в полёте, весь список не нажимается — второе нажатие
+/// подняло бы второй процесс поверх первого.
 fn episodes(view: &ReleaseView) -> Element<'_, Message> {
     let caption = format!(
-        "Серии · {}",
-        util::count_label(view.episodes.len() as i64, "эпизод", "эпизода", "эпизодов")
+        "Серии · {} · {}",
+        util::count_label(view.episodes.len() as i64, "эпизод", "эпизода", "эпизодов"),
+        view.episode_order.label()
     );
 
     if view.episodes.is_empty() {
@@ -676,27 +822,32 @@ fn episodes(view: &ReleaseView) -> Element<'_, Message> {
         return widgets::section(caption, widgets::busy(note.to_owned()));
     }
 
-    let mut pills = Row::new().spacing(8);
-    for (index, episode) in view.episodes.iter().enumerate() {
-        let chosen = view.playing == Some(index) || view.pending == Some(index);
-        pills = pills.push(widgets::pill(episode_caption(episode, index), chosen, Message::PlayEpisode(index)));
+    let waiting = view.pending.is_some();
+    let mut rows = Column::new().spacing(10);
+    for index in view.ordered_episodes() {
+        let episode = &view.episodes[index];
+        let action = if view.pending == Some(index) {
+            "Решаю ссылку…"
+        } else if view.playing == Some(index) {
+            "Играет"
+        } else {
+            "Смотреть"
+        };
+
+        rows = rows.push(entry(
+            episode_title(episode, index),
+            episode_marks(episode),
+            action,
+            view.playing == Some(index) || view.pending == Some(index),
+            (!waiting).then_some(Message::PlayEpisode(index)),
+        ));
     }
 
-    let mut body = Column::new().spacing(10).push(pills.wrap());
-    if let Some(pending) = view.pending {
-        let position = view
-            .episodes
-            .get(pending)
-            .map(|episode| episode.position.max(0))
-            .unwrap_or(0);
-        body = body.push(widgets::busy(format!("Разбираю ссылку серии №{position}…")));
-    }
-
-    widgets::section(caption, body)
+    widgets::section(caption, rows)
 }
 
-/// Подпись пилюли серии: номер, имя и всё, что о ней известно.
-fn episode_caption(episode: &Episode, index: usize) -> String {
+/// Заголовок ряда: номер серии и её имя, когда backend потрудился его прислать.
+fn episode_title(episode: &Episode, index: usize) -> String {
     let position = if episode.position > 0 {
         episode.position
     } else {
@@ -709,8 +860,15 @@ fn episode_caption(episode: &Episode, index: usize) -> String {
         .filter(|text| !text.is_empty())
         .map(|text| format!(" · {text}"))
         .unwrap_or_default();
+
+    format!("№{position}{name}")
+}
+
+/// Всё остальное, что известно о серии: качество, филлер, просмотрено.
+fn episode_marks(episode: &Episode) -> String {
     let quality = widgets::quality_label(episode.quality);
-    let marks = widgets::join_meta(vec![
+
+    widgets::join_meta(vec![
         if quality == "Default" {
             String::new()
         } else {
@@ -726,13 +884,15 @@ fn episode_caption(episode: &Episode, index: usize) -> String {
         } else {
             String::new()
         },
-    ]);
+    ])
+}
 
-    if marks.is_empty() {
-        format!("№{position}{name}")
-    } else {
-        format!("№{position}{name} · {marks}")
-    }
+/// Подпись серии целиком — заголовок ряда плюс её отметки, тем же порядком.
+fn episode_caption(episode: &Episode, index: usize) -> String {
+    widgets::join_meta(vec![
+        episode_title(episode, index),
+        episode_marks(episode),
+    ])
 }
 
 /// Одна строка выбора: заголовок и мета-строка слева, пилюля действия справа.
@@ -1078,6 +1238,138 @@ mod tests {
             ..Default::default()
         };
         assert!(meta_chips(&unknown).iter().all(|chip| !chip.is_empty()));
+    }
+
+    #[test]
+    fn the_episode_order_sorts_without_renumbering_the_rows() {
+        let mut view = ReleaseView {
+            episodes: vec![
+                Episode {
+                    id: 30,
+                    position: 3,
+                    ..Default::default()
+                },
+                Episode {
+                    id: 10,
+                    position: 1,
+                    ..Default::default()
+                },
+                Episode {
+                    id: 20,
+                    position: 2,
+                    ..Default::default()
+                },
+                // без `position` серия нумеруется местом в ответе сервера — №4
+                Episode {
+                    id: 40,
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert_eq!(
+            view.episode_order,
+            EpisodeOrder::First,
+            "по умолчанию список начинается с первой серии"
+        );
+        assert_eq!(view.ordered_episodes(), vec![1, 2, 0, 3]);
+
+        view.toggle_episode_order();
+        assert_eq!(view.episode_order, EpisodeOrder::Newest);
+        assert_eq!(view.ordered_episodes(), vec![3, 0, 2, 1]);
+
+        // перестановка не трогает сам список: индекс ряда остаётся настоящим
+        assert_eq!(
+            view
+                .episodes
+                .iter()
+                .map(|episode| episode.id)
+                .collect::<Vec<i64>>(),
+            vec![30, 10, 20, 40]
+        );
+        assert_eq!(view.episode_label(1).as_deref(), Some("№1"));
+
+        view.pending = Some(0);
+        view.toggle_episode_order();
+        assert_eq!(view.episode_order, EpisodeOrder::First);
+        assert_eq!(
+            view.episode(0).map(|episode| episode.id),
+            Some(30),
+            "ожидание решателя не съехало вместе с рядом"
+        );
+
+        assert_eq!(EpisodeOrder::First.label(), "Сначала 1-я");
+        assert_eq!(EpisodeOrder::Newest.label(), "Сначала новая");
+        assert_eq!(EpisodeOrder::First.toggled(), EpisodeOrder::Newest);
+        assert_eq!(EpisodeOrder::Newest.toggled(), EpisodeOrder::First);
+    }
+
+    #[test]
+    fn the_sources_screen_builds_headlessly_with_a_pinned_header_and_both_orders() {
+        let cache = PosterCache::new();
+        let mut view = ReleaseView {
+            release: Some(release(1, false)),
+            types: vec![EpisodeType {
+                id: 5,
+                name: "AniLibria".to_owned(),
+                episodes_count: 2,
+                ..Default::default()
+            }],
+            selected_type: Some(0),
+            sources: vec![Source {
+                id: 77,
+                name: " Kodik ".to_owned(),
+                episodes_count: 2,
+                quality: 4,
+            }],
+            selected_source: Some(0),
+            episodes: vec![
+                Episode {
+                    id: 2,
+                    position: 2,
+                    url: "https://kodik.example/2".to_owned(),
+                    ..Default::default()
+                },
+                Episode {
+                    id: 1,
+                    position: 1,
+                    url: "https://kodik.example/1".to_owned(),
+                    is_watched: true,
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+
+        {
+            let _first = view.sources_view(&cache);
+        }
+        view.toggle_episode_order();
+        {
+            let _newest = view.sources_view(&cache);
+        }
+
+        // источник снят: пилюли в шапке остаются, тело пересказывает список хостов
+        view.selected_source = None;
+        {
+            let _hosting_only = view.sources_view(&cache);
+        }
+
+        // серия в полёте: ряды собираются и не нажимаются
+        view.selected_source = Some(0);
+        view.pending = Some(1);
+        {
+            let _resolving = view.sources_view(&cache);
+        }
+
+        // озвучек вовсе нет: шапка жива, тело — одна подсказка
+        view.types.clear();
+        view.sources.clear();
+        view.selected_type = None;
+        {
+            let _nothing = view.sources_view(&cache);
+        }
     }
 
     #[test]

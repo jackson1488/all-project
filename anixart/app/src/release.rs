@@ -399,7 +399,7 @@ fn variants<'a>(view: &ReleaseView) -> Element<'a, Message> {
         ))
     });
 
-    widgets::section("Выберите вариант".to_owned(), pills.wrap().into())
+    widgets::section("Выберите вариант".to_owned(), pills.wrap())
 }
 
 /// Чипы метаданных релиза — только те поля, которые backend действительно прислал.

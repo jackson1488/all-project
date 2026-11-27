@@ -24,7 +24,11 @@ pub mod codes {
 pub struct Pageable<T> {
     #[serde(default, deserialize_with = "de_null_default")]
     pub code: i32,
-    #[serde(default, deserialize_with = "de_null_default")]
+    #[serde(
+        default,
+        bound(deserialize = "T: Deserialize<'de>"),
+        deserialize_with = "de_null_default"
+    )]
     pub content: Vec<T>,
     #[serde(default, deserialize_with = "de_null_default")]
     pub current_page: i32,

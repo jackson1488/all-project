@@ -717,6 +717,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn the_scroll_trigger_fires_only_near_the_bottom_and_never_above_it() {
         assert!(!reached_end(0.0), "верх полки — не повод догружать");
         assert!(!reached_end(0.5));
@@ -726,8 +727,8 @@ mod tests {
         assert!(reached_end(1.0), "дно — всегда повод");
         // порог оставлен с запасом до единицы: последний кадр прокрутки обязан
         // пойматься, пока смещение ещё не дошло до 1.0
-        const { assert!(SCROLL_TRIGGER > 0.5) };
-        const { assert!(SCROLL_TRIGGER < 1.0) };
+        assert!(SCROLL_TRIGGER > 0.5, "половина полки — ещё не дно");
+        assert!(SCROLL_TRIGGER < 1.0, "запас до дна гарантирует срабатывание");
         // отрицательное смещение — не дно, каким бы оно ни было в отладке
         assert!(!reached_end(-1.0));
     }

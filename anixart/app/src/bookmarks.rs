@@ -212,7 +212,11 @@ impl Bookmarks {
 
     /// Пуста ли полка, которая сейчас на экране.
     pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        if self.tab.is_collections() {
+            self.collections.is_empty()
+        } else {
+            self.releases.is_empty()
+        }
     }
 
     /// Что говорит пустое состояние этого таба, сформулированное как действие,

@@ -18,4 +18,7 @@ pub use episode::{
 pub use feed::{FeedChannel, FeedItem};
 pub use filter::{FilterRequest, WatchStatus};
 pub use profile::{Profile, ProfileInfoResponse, ProfileResponse};
-pub use release::{Related, Release, ReleaseResponse, ReleaseSearchResponse, SearchRequest};
+pub use release::{
+    DiscoverCommentItem, DiscoverInterestingItem, Related, Release, ReleaseResponse,
+    ReleaseSearchResponse, SearchRequest,
+};

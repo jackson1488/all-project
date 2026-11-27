@@ -6,10 +6,10 @@ use serde::de::DeserializeOwned;
 
 use crate::error::{AnixartError, Result};
 use crate::models::{
-    CodeResponse, Collection, CollectionResponse, EpisodeResponse, FeedItem, FilterRequest,
-    Pageable, ProfileInfoResponse, ProfileResponse, Release, ReleaseResponse,
-    ReleaseSearchResponse, SearchRequest, SignInResponse, SocialSignInResponse, SourcesResponse,
-    TypesResponse, WatchStatus,
+    CodeResponse, Collection, CollectionResponse, DiscoverCommentItem, DiscoverInterestingItem,
+    EpisodeResponse, FeedItem, FilterRequest, Pageable, ProfileInfoResponse, ProfileResponse,
+    Release, ReleaseResponse, ReleaseSearchResponse, SearchRequest, SignInResponse,
+    SocialSignInResponse, SourcesResponse, TypesResponse, WatchStatus,
 };
 use crate::oauth::{self, SocialProvider, TelegramPkce};
 use crate::API_BASE_URL;
@@ -661,7 +661,35 @@ impl AnixartClient {
         let url = self.build_url("discover/interesting", &[])?;
         let resp = self.http.post(url).send().await?.error_for_status()?;
         let text = resp.text().await?;
-        Ok(serde_json::from_str(&text)?)
+        let raw: Pageable<DiscoverInterestingItem> = serde_json::from_str(&text)?;
+        let content = raw
+            .content
+            .into_iter()
+            .map(|item| {
+                let release_id = if item.kind == 1 {
+                    item.action
+                        .as_deref()
+                        .and_then(|s| s.trim().parse::<i64>().ok())
+                        .unwrap_or(item.id)
+                } else {
+                    item.id
+                };
+                Release {
+                    id: release_id,
+                    title_ru: item.title,
+                    description: item.description,
+                    image: item.image,
+                    ..Default::default()
+                }
+            })
+            .collect();
+        Ok(Pageable {
+            code: raw.code,
+            content,
+            current_page: raw.current_page,
+            total_count: raw.total_count,
+            total_page_count: raw.total_page_count,
+        })
     }
 
     /// `POST /discover/comments` — most commented / discussed releases.
@@ -669,7 +697,25 @@ impl AnixartClient {
         let url = self.build_url("discover/comments", &[])?;
         let resp = self.http.post(url).send().await?.error_for_status()?;
         let text = resp.text().await?;
-        Ok(serde_json::from_str(&text)?)
+        let raw: Pageable<DiscoverCommentItem> = serde_json::from_str(&text)?;
+        let content = raw
+            .content
+            .into_iter()
+            .filter_map(|item| {
+                let mut rel = item.release?;
+                if rel.description.as_deref().unwrap_or("").trim().is_empty() {
+                    rel.description = item.message;
+                }
+                Some(rel)
+            })
+            .collect();
+        Ok(Pageable {
+            code: raw.code,
+            content,
+            current_page: raw.current_page,
+            total_count: raw.total_count,
+            total_page_count: raw.total_page_count,
+        })
     }
 }
 

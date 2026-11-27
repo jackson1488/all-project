@@ -195,7 +195,34 @@ fn collections_page_fixture() {
 fn release_accepts_poster_alias() {
     let raw = r#"{"id":1,"poster":"https://cdn.example/poster.jpg"}"#;
     let r: Release = parse(raw);
-    assert_eq!(r.image.as_deref(), Some("https://cdn.example/poster.jpg"));
+    assert_eq!(r.poster.as_deref(), Some("https://cdn.example/poster.jpg"));
+    assert_eq!(r.poster_url().as_deref(), Some("https://cdn.example/poster.jpg"));
+}
+
+#[test]
+fn release_accepts_both_poster_and_image_and_object_status() {
+    let raw = r#"{"id":18400,"poster":"9WUAYwczbg2pzZWnnca1yqU1Txniuv","image":"https://s.anixmirai.com/posters/9WUAYwczbg2pzZWnnca1yqU1Txniuv.jpg","status":{"id":2,"name":"Выходит"},"title_ru":"Противостоящий небесам"}"#;
+    let r: Release = parse(raw);
+    assert_eq!(r.id, 18400);
+    assert_eq!(r.poster.as_deref(), Some("9WUAYwczbg2pzZWnnca1yqU1Txniuv"));
+    assert_eq!(
+        r.image.as_deref(),
+        Some("https://s.anixmirai.com/posters/9WUAYwczbg2pzZWnnca1yqU1Txniuv.jpg")
+    );
+    assert_eq!(r.status.as_deref(), Some("Выходит"));
+    assert_eq!(
+        r.poster_url().as_deref(),
+        Some("https://s.anixmirai.com/posters/9WUAYwczbg2pzZWnnca1yqU1Txniuv.jpg")
+    );
+}
+
+#[test]
+fn search_response_accepts_content_field() {
+    let raw = r#"{"code":0,"content":[{"id":609,"poster":"abc","image":"https://s.anixmirai.com/posters/abc.jpg","title_ru":"Наруто"}]}"#;
+    let resp: ReleaseSearchResponse = parse(raw);
+    assert!(resp.is_success());
+    assert_eq!(resp.releases.len(), 1);
+    assert_eq!(resp.releases[0].id, 609);
 }
 
 #[test]

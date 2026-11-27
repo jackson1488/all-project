@@ -1,4 +1,19 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+
+fn de_status_name<'de, D>(deserializer: D) -> std::result::Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value: Option<serde_json::Value> = Option::deserialize(deserializer)?;
+    Ok(match value {
+        Some(serde_json::Value::String(s)) => Some(s),
+        Some(serde_json::Value::Object(map)) => map
+            .get("name")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned),
+        _ => None,
+    })
+}
 
 /// Release card / catalogue entry.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -13,8 +28,10 @@ pub struct Release {
     pub title_alt: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
-    #[serde(default, alias = "poster")]
+    #[serde(default)]
     pub image: Option<String>,
+    #[serde(default)]
+    pub poster: Option<String>,
     #[serde(default)]
     pub year: Option<String>,
     #[serde(default)]
@@ -63,8 +80,23 @@ pub struct Release {
     pub profile_list_status: i32,
     #[serde(default)]
     pub release_date: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_status_name")]
     pub status: Option<String>,
+}
+
+impl Release {
+    /// Returns the best available poster URL, falling back to `poster` when `image` is absent.
+    pub fn poster_url(&self) -> Option<String> {
+        if let Some(img) = self.image.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            return Some(img.to_owned());
+        }
+        let p = self.poster.as_deref().map(str::trim).filter(|s| !s.is_empty())?;
+        if p.starts_with("http://") || p.starts_with("https://") || p.starts_with('/') {
+            Some(p.to_owned())
+        } else {
+            Some(format!("https://s.anixmirai.com/posters/{p}.jpg"))
+        }
+    }
 }
 
 /// `GET /release/{id}` envelope.
@@ -96,7 +128,7 @@ pub struct Related {
 pub struct ReleaseSearchResponse {
     #[serde(default)]
     pub code: i32,
-    #[serde(default)]
+    #[serde(default, alias = "content")]
     pub releases: Vec<Release>,
     #[serde(default)]
     pub related: Option<Related>,
@@ -106,6 +138,34 @@ impl ReleaseSearchResponse {
     pub fn is_success(&self) -> bool {
         self.code == 0
     }
+}
+
+/// Item returned by `POST /discover/interesting`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct DiscoverInterestingItem {
+    #[serde(default)]
+    pub id: i64,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub image: Option<String>,
+    #[serde(default, rename = "type")]
+    pub kind: i32,
+    #[serde(default)]
+    pub action: Option<String>,
+}
+
+/// Item returned by `POST /discover/comments`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct DiscoverCommentItem {
+    #[serde(default)]
+    pub id: i64,
+    #[serde(default)]
+    pub message: Option<String>,
+    #[serde(default)]
+    pub release: Option<Release>,
 }
 
 /// Body for release / collection / profile search.

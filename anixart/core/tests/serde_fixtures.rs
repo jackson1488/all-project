@@ -274,3 +274,37 @@ fn filter_request_accepts_snake_case_and_camel_case() {
     assert_eq!(req.category_id, Some(10));
     assert_eq!(req.profile_list_exclusions, vec![1, 2]);
 }
+
+#[test]
+fn explicit_nulls_in_live_payloads_default_cleanly() {
+    let raw = r#"{
+        "code": 0,
+        "content": [{
+            "id": 20290,
+            "poster": "abc",
+            "image": "https://s.anixmirai.com/posters/abc.jpg",
+            "grade": null,
+            "rating": null,
+            "age_rating": null,
+            "duration": null,
+            "season": null,
+            "status_id": null,
+            "favorites_count": null,
+            "comment_count": null,
+            "vote_count": null,
+            "is_favorite": null,
+            "is_adult": null,
+            "is_viewed": null,
+            "profile_list_status": null,
+            "status": null
+        }],
+        "current_page": 0,
+        "total_count": null,
+        "total_page_count": null
+    }"#;
+    let page: Pageable<Release> = parse(raw);
+    assert!(page.is_success());
+    assert_eq!(page.content.len(), 1);
+    assert_eq!(page.content[0].id, 20290);
+    assert_eq!(page.content[0].profile_list_status, 0);
+}

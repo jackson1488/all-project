@@ -1,5 +1,7 @@
 use serde::{Deserialize, Deserializer, Serialize};
 
+use super::common::de_null_default;
+
 fn de_status_name<'de, D>(deserializer: D) -> std::result::Result<Option<String>, D::Error>
 where
     D: Deserializer<'de>,
@@ -18,7 +20,7 @@ where
 /// Release card / catalogue entry.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct Release {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_null_default")]
     pub id: i64,
     #[serde(default)]
     pub title_ru: Option<String>,
@@ -48,35 +50,35 @@ pub struct Release {
     pub translators: Option<String>,
     #[serde(default)]
     pub source: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_null_default")]
     pub grade: f64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_null_default")]
     pub rating: i32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_null_default")]
     pub age_rating: i32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_null_default")]
     pub duration: i32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_null_default")]
     pub season: i32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_null_default")]
     pub status_id: i64,
     #[serde(default)]
     pub episodes_released: Option<i32>,
     #[serde(default)]
     pub episodes_total: Option<i32>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_null_default")]
     pub favorites_count: i32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_null_default")]
     pub comment_count: i64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_null_default")]
     pub vote_count: i32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_null_default")]
     pub is_favorite: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_null_default")]
     pub is_adult: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_null_default")]
     pub is_viewed: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_null_default")]
     pub profile_list_status: i32,
     #[serde(default)]
     pub release_date: Option<String>,
@@ -102,7 +104,7 @@ impl Release {
 /// `GET /release/{id}` envelope.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct ReleaseResponse {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_null_default")]
     pub code: i32,
     #[serde(default)]
     pub release: Option<Release>,
@@ -117,7 +119,7 @@ impl ReleaseResponse {
 /// Related franchise block occasionally returned by search.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct Related {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_null_default")]
     pub id: i64,
     #[serde(default)]
     pub name: Option<String>,
@@ -126,9 +128,9 @@ pub struct Related {
 /// `POST /search/releases/{page}` response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct ReleaseSearchResponse {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_null_default")]
     pub code: i32,
-    #[serde(default, alias = "content")]
+    #[serde(default, alias = "content", deserialize_with = "de_null_default")]
     pub releases: Vec<Release>,
     #[serde(default)]
     pub related: Option<Related>,
@@ -143,7 +145,7 @@ impl ReleaseSearchResponse {
 /// Item returned by `POST /discover/interesting`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct DiscoverInterestingItem {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_null_default")]
     pub id: i64,
     #[serde(default)]
     pub title: Option<String>,
@@ -151,7 +153,7 @@ pub struct DiscoverInterestingItem {
     pub description: Option<String>,
     #[serde(default)]
     pub image: Option<String>,
-    #[serde(default, rename = "type")]
+    #[serde(default, rename = "type", deserialize_with = "de_null_default")]
     pub kind: i32,
     #[serde(default)]
     pub action: Option<String>,
@@ -160,7 +162,7 @@ pub struct DiscoverInterestingItem {
 /// Item returned by `POST /discover/comments`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct DiscoverCommentItem {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_null_default")]
     pub id: i64,
     #[serde(default)]
     pub message: Option<String>,

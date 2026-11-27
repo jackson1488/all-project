@@ -1,20 +1,21 @@
 use serde::{Deserialize, Serialize};
 
+use super::common::de_null_default;
 use super::profile::Profile;
 
 /// Token object returned by sign-in.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ProfileToken {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_null_default")]
     pub id: i64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_null_default")]
     pub token: String,
 }
 
 /// `POST /auth/signIn` response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct SignInResponse {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_null_default")]
     pub code: i32,
     #[serde(default)]
     pub profile: Option<Profile>,
@@ -35,11 +36,11 @@ impl SignInResponse {
 /// `POST /auth/checkLogin` response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct CheckLoginResponse {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_null_default")]
     pub code: i32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_null_default")]
     pub available: bool,
-    #[serde(default, alias = "suggestedLogins")]
+    #[serde(default, alias = "suggestedLogins", deserialize_with = "de_null_default")]
     pub suggested_logins: Vec<String>,
 }
 
@@ -52,22 +53,22 @@ pub struct CheckLoginResponse {
 /// spellings are accepted.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct SocialSignInResponse {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_null_default")]
     pub code: i32,
     #[serde(default)]
     pub profile: Option<Profile>,
     #[serde(default, alias = "profileToken")]
     pub profile_token: Option<ProfileToken>,
     /// Non-empty when the server expects an e-mail confirmation code.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_null_default")]
     pub hash: String,
-    #[serde(default, alias = "codeTimestampExpires")]
+    #[serde(default, alias = "codeTimestampExpires", deserialize_with = "de_null_default")]
     pub code_timestamp_expires: i64,
     #[serde(default, alias = "codeLength")]
     pub code_length: Option<i32>,
     #[serde(default, alias = "codeTimeLeft")]
     pub code_time_left: Option<i64>,
-    #[serde(default, alias = "suggestedLogins")]
+    #[serde(default, alias = "suggestedLogins", deserialize_with = "de_null_default")]
     pub suggested_logins: Vec<String>,
     /// Only the Yandex variant carries a verified e-mail.
     #[serde(default)]

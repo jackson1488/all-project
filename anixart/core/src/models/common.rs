@@ -1,4 +1,13 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+
+/// Deserializes `null` as `T::default()`, complementing `#[serde(default)]` which only handles missing keys.
+pub fn de_null_default<'de, D, T>(deserializer: D) -> std::result::Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
+}
 
 /// Envelope `code` values from the Anixart API.
 pub mod codes {
@@ -13,15 +22,15 @@ pub mod codes {
 /// Generic paginated response used by feed / favorites / history.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct Pageable<T> {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_null_default")]
     pub code: i32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_null_default")]
     pub content: Vec<T>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_null_default")]
     pub current_page: i32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_null_default")]
     pub total_count: i64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_null_default")]
     pub total_page_count: i32,
 }
 
@@ -34,7 +43,7 @@ impl<T> Pageable<T> {
 /// Bare `{ "code": n }` response (favorites add/delete, history mutate, …).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct CodeResponse {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_null_default")]
     pub code: i32,
 }
 

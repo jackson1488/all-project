@@ -534,16 +534,16 @@ mod tests {
                 BrowseTab::Search => BrowsePage::Search(search(&[1, 2, 3])),
                 _ => BrowsePage::Shelf(shelf(&[1, 2, 3, 4, 5, 6])),
             });
-            let _first = browse.view(&cache);
+            let _ = browse.view(&cache);
 
             if browse.can_load_more() {
                 browse.begin_more();
-                let _more = browse.view(&cache);
+                let _ = browse.view(&cache);
                 browse.apply(BrowsePage::Shelf(shelf(&[])));
             } else {
                 browse.apply(BrowsePage::Shelf(shelf(&[])));
             }
-            let _tail = browse.view(&cache);
+            let _ = browse.view(&cache);
         }
     }
 }

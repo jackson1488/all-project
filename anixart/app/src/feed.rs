@@ -322,13 +322,13 @@ mod tests {
         let mut feed = Feed::default();
         feed.begin();
         feed.apply(shelf(&(1..=6).collect::<Vec<i64>>()));
-        let _first_page = feed.view(&cache);
+        let _ = feed.view(&cache);
         assert!(feed.can_load_more());
 
         feed.begin_more();
-        let _loading_more = feed.view(&cache);
+        let _ = feed.view(&cache);
 
         feed.apply(shelf(&[]));
-        let _exhausted = feed.view(&cache);
+        let _ = feed.view(&cache);
     }
 }

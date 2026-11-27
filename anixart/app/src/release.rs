@@ -286,7 +286,7 @@ impl ReleaseView {
         let mut body = Column::new()
             .spacing(12)
             .push(self.header(release, cache))
-            .push(variants(self.choosing))
+            .push(variants(self))
             .push(voiceovers(self));
 
         body = body.push(
@@ -304,7 +304,7 @@ impl ReleaseView {
     ///
     /// Он открывается из списка озвучек и закрывается назад к нему же, поэтому
     /// верхней пилюлей стоит «← Назад к озвучкам», а не «Назад к полке».
-    pub fn sources_view<'a>(&'a self, cache: &'a PosterCache) -> Element<'a, Message> {
+    pub fn sources_view<'a>(&'a self, _cache: &'a PosterCache) -> Element<'a, Message> {
         let heading = match (self.title(), self.type_name()) {
             (Some(title), Some(kind)) => format!("{title} · {kind}"),
             (Some(title), None) => title,
@@ -399,7 +399,7 @@ fn variants<'a>(view: &ReleaseView) -> Element<'a, Message> {
         ))
     });
 
-    widgets::section("Выберите вариант", pills.wrap())
+    widgets::section("Выберите вариант", pills.wrap().into())
 }
 
 /// Чипы метаданных релиза — только те поля, которые backend действительно прислал.
@@ -958,7 +958,7 @@ mod tests {
         assert_eq!(view.visible_types()[0].1.id, 6);
 
         // ни одна запись не подошла: список пуст, но серверные индексы целы
-        view.types = vec![sub];
+        view.types = vec![sub.clone()];
         view.choose_variant(VariantFilter::Voiceover);
         assert!(view.visible_types().is_empty());
         assert_eq!(view.types.len(), 1);

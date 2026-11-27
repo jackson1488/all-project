@@ -305,7 +305,6 @@ impl Bookmarks {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lists::WatchStatus;
     use anixart_core::Profile;
 
     fn releases(ids: &[i64]) -> Pageable<Release> {
@@ -590,10 +589,10 @@ mod tests {
                 signed_in: true,
                 ..Default::default()
             };
-            let _empty = bookmarks.view(&cache);
+            let _ = bookmarks.view(&cache);
 
             bookmarks.paging.loading = true;
-            let _busy = bookmarks.view(&cache);
+            let _ = bookmarks.view(&cache);
 
             bookmarks.paging.loading = false;
             bookmarks.begin();
@@ -601,16 +600,16 @@ mod tests {
                 BookmarkTab::Collections => BookmarkPage::Collections(collections(&[1, 2])),
                 _ => BookmarkPage::Releases(releases(&[1, 2, 3, 4, 5])),
             });
-            let _first = bookmarks.view(&cache);
+            let _ = bookmarks.view(&cache);
 
             bookmarks.begin_more();
-            let _loading_more = bookmarks.view(&cache);
+            let _ = bookmarks.view(&cache);
 
             bookmarks.apply(match tab {
                 BookmarkTab::Collections => BookmarkPage::Collections(collections(&[])),
                 _ => BookmarkPage::Releases(releases(&[])),
             });
-            let _exhausted = bookmarks.view(&cache);
+            let _ = bookmarks.view(&cache);
         }
     }
 }

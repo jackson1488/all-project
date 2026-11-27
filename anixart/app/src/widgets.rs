@@ -26,8 +26,9 @@
 //!   style function; the plain texts of a card set theirs explicitly.
 
 use anixart_core::{Collection, EpisodeType, Release};
+use iced::widget::scrollable::Viewport;
 use iced::widget::{button, container, scrollable, text, Column, Row, Text};
-use iced::{alignment, Element, Length, Viewport};
+use iced::{alignment, Element, Length};
 
 use crate::app::Message;
 use crate::posters::{self, PosterCache};

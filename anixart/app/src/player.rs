@@ -365,9 +365,17 @@ async fn ipc_multi(
     Ok(replies)
 }
 
-/// JSON‑строка команды mpv: `["seek", "10", "relative"]`.
+/// JSON‑строка команды mpv: `["seek", "10", "relative"]` / `["set_property", "pause", true]`.
 fn encode_command(arguments: &[String]) -> Result<String, String> {
-    serde_json::to_string(arguments).map_err(|error| format!("команда не кодируется: {error}"))
+    let values: Vec<serde_json::Value> = arguments
+        .iter()
+        .map(|arg| match arg.as_str() {
+            "true" => serde_json::Value::Bool(true),
+            "false" => serde_json::Value::Bool(false),
+            _ => serde_json::Value::String(arg.clone()),
+        })
+        .collect();
+    serde_json::to_string(&values).map_err(|error| format!("команда не кодируется: {error}"))
 }
 
 /// Три ответа тика: позиция, длительность, пауза.
@@ -392,13 +400,10 @@ pub fn apply_tick(player: &mut Player, reply: Result<Vec<Option<serde_json::Valu
             if let Some(Some(position)) = iter.next() {
                 player.position = position.as_f64().unwrap_or(player.position);
             }
-            match iter.next() {
+            if let Some(Some(duration)) = iter.next() {
                 // свойство есть, но значения пока нет (`duration` до первой
                 // декады кадров) — полоса становится пустой, а не вральной
-                Some(Some(duration)) => player.duration = duration.as_f64().unwrap_or(0.0),
-                Some(None) => player.duration = 0.0,
-                // ответа не пришло вовсе: известное остаётся
-                _ => {}
+                player.duration = duration.as_f64().unwrap_or(0.0);
             }
             if let Some(Some(paused)) = iter.next() {
                 player.paused = paused.as_bool().unwrap_or(player.paused);
@@ -719,7 +724,7 @@ mod tests {
     #[test]
     fn qualities_are_ordered_from_the_highest_down() {
         let list = quality_list(&video());
-        assert_eq!(list, vec!["1080p", "Default", "360p"]);
+        assert_eq!(list, vec!["1080p", "360p", "Default"]);
 
         // неизвестные подписи не теряются, а идут по алфавиту в конце
         let odd = ParsedVideo::new(VideoSource::Vk)

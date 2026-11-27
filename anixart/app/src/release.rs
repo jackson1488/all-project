@@ -1816,7 +1816,7 @@ mod tests {
         let named = Episode {
             id: 12,
             position: 12,
-            name: Some("Битва за Коноху, которую ждали весь сезон".to_owned()),
+            name: Some("Битва за Коноху, которую ждали весь сезон и даже дольше обещанного".to_owned()),
             quality: 4,
             is_watched: true,
             url: "https://kodik.example/12".to_owned(),
@@ -1842,7 +1842,10 @@ mod tests {
         let _waiting = episode_row(&anonymous, 1, false, "Решаю ссылку…", None);
 
         // подпись серии для окна `mpv` не обрезается: там хватает места
-        assert_eq!(episode_caption(&named, 0), "№12 · Битва за Коноху, которую ждали весь сезон · 1080p · Просмотрено");
+        assert_eq!(
+            episode_caption(&named, 0),
+            "№12 · Битва за Коноху, которую ждали весь сезон и даже дольше обещанного · 1080p · Просмотрено"
+        );
         assert_eq!(episode_caption(&anonymous, 1), "№2");
     }
 

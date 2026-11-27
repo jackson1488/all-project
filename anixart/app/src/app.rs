@@ -2257,11 +2257,12 @@ mod tests {
             "Наруто — №12 · Битва за Коноху"
         );
         assert_eq!(app.playback_caption(Some(1)), "Наруто — №2");
-        assert_eq!(app.playback_caption(None), "Серия");
+        assert_eq!(app.playback_caption(None), "Наруто — Серия");
 
         // релиз, который ещё не пришёл, зовётся только серией: тире без имени лжёт
         app.release.release = None;
         assert_eq!(app.playback_caption(Some(0)), "№12 · Битва за Коноху");
+        assert_eq!(app.playback_caption(None), "Серия");
     }
 
     #[test]

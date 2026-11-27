@@ -1,6 +1,19 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use super::common::de_null_default;
+
+fn de_source_or_id<'de, D>(deserializer: D) -> std::result::Result<Option<Source>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value: Option<serde_json::Value> = Option::deserialize(deserializer)?;
+    Ok(match value {
+        Some(serde_json::Value::Object(map)) => {
+            serde_json::from_value(serde_json::Value::Object(map)).ok()
+        }
+        _ => None,
+    })
+}
 
 /// Voiceover / translation type (`Type` in the Android client).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -68,7 +81,7 @@ pub struct Episode {
     pub is_filler: bool,
     #[serde(default, deserialize_with = "de_null_default")]
     pub is_watched: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_source_or_id")]
     pub source: Option<Source>,
 }
 

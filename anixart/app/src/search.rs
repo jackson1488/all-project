@@ -1,27 +1,34 @@
-//! «Обзор» — search, the catalogue filter and the two discovery shelves in one
-//! screen with four pills.
+//! «Обзор» — поиск, фильтр каталога и две алгоритмические полки в одном экране
+//! с четырьмя пилюлями.
 //!
-//! The four shelves are kept in one state machine rather than four screens,
-//! because they all answer with releases and all lead to the same release page:
-//! switching a pill changes only the request, never the layout. The search and
-//! catalogue shelves are paginated (`POST /search/releases/{page}`,
-//! `POST /filter/{page}`), while the discovery shelves (`POST /discover/*`) take
-//! no page argument at all — [`BrowseTab::is_paged`] is what hides their pager.
+//! Четыре полки держатся в одной машине состояний, а не в четырёх экранах: все
+//! четыре отвечают релизами и все ведут на одну и ту же страницу релиза, поэтому
+//! переключение пилюли меняет только запрос, никогда — раскладку. Поиск и каталог
+//! paginated (`POST /search/releases/{page}`, `POST /filter/{page}`), а
+//! `/discover/*` номера страницы не принимает вовсе — [`BrowseTab::is_paged`]
+//! говорит, есть ли у полки куда догружать.
 //!
-//! None of the four endpoints is `require_token()` upstream, so this screen is the
-//! one a guest can open straight away.
+//! Кнопок «Предыдущая» / «Следующая» здесь нет: смещение прокрутки приходит как
+//! [`Message::Scrolled`](crate::app::Message::Scrolled), [`widgets::reached_end`]
+//! решает, доехали ли до низа, и следующая страница дописывается к стене постеров
+//! ([`Browse::apply`]). Полка, у которой нет второй страницы, заканчивается на
+//! первой и больше не просит ничего.
+//!
+//! Ни один из четырёх эндпоинтов не `require_token()`, так что этот экран гость
+//! может открыть сразу.
 
 use anixart_core::{Pageable, Release, ReleaseSearchResponse};
 use iced::widget::{text_input, Column, Row};
 use iced::Element;
 
 use crate::app::Message;
-use crate::lists::{catalog_sort_label, BrowseTab, CATALOG_SORTS};
+use crate::lists::{append_unique, catalog_sort_label, BrowseTab, CATALOG_SORTS, Paging};
 use crate::posters::{self, PosterCache};
+use crate::util;
 use crate::widgets;
 
-/// One fetched shelf of the «Обзор» screen: the search endpoint answers with a
-/// bare list plus a related genre, the other three with a page.
+/// Одна fetched полка «Обзора»: поиск отвечает голым списком плюс похожая
+/// категория, три остальные — страницей релизов.
 #[derive(Debug, Clone)]
 pub enum BrowsePage {
     Search(ReleaseSearchResponse),
@@ -29,7 +36,7 @@ pub enum BrowsePage {
 }
 
 impl BrowsePage {
-    /// Releases the answer carries.
+    /// Релизы, которые ответ принёс.
     pub fn releases(&self) -> &[Release] {
         match self {
             Self::Search(response) => &response.releases,
@@ -46,26 +53,7 @@ impl BrowsePage {
         self.releases().is_empty()
     }
 
-    /// Page number the backend echoed, `None` for the answers that carry none —
-    /// the search endpoint and the discovery shelves report no page cursor at all,
-    /// so the page the request asked for is the only one that can be shown.
-    pub fn page(&self) -> Option<usize> {
-        match self {
-            Self::Search(_) => None,
-            Self::Shelf(page) => Some(page.current_page.max(0) as usize),
-        }
-    }
-
-    /// Total pages, `0` for search (the endpoint does not count them) and for the
-    /// unpaginated discovery shelves.
-    pub fn total_pages(&self) -> usize {
-        match self {
-            Self::Search(_) => 0,
-            Self::Shelf(page) => page.total_page_count.max(0) as usize,
-        }
-    }
-
-    /// Genre the backend suggested next to the query, if it offered one.
+    /// Похожая категория, которую backend предложил рядом с запросом.
     pub fn related(&self) -> Option<&str> {
         match self {
             Self::Search(response) => response
@@ -79,59 +67,84 @@ impl BrowsePage {
     }
 }
 
-/// State of the «Обзор» screen.
+/// Состояние «Обзора».
 #[derive(Debug, Default)]
 pub struct Browse {
     pub tab: BrowseTab,
     pub query: String,
     pub releases: Vec<Release>,
-    pub page: usize,
-    pub total_pages: usize,
-    pub loading: bool,
-    /// Sort id `POST /filter/{page}` was asked with.
+    pub paging: Paging,
+    /// Sort id, с которым `POST /filter/{page}` спрашивается сейчас.
     pub sort: i32,
-    /// Related genre the last search offered.
+    /// Похожая категория из последнего ответа поиска.
     pub related: Option<String>,
 }
 
 impl Browse {
-    /// The pill row changed: the shelf is emptied, because a wall of posters from
-    /// the previous request under a new caption reads as wrong data.
+    /// Пилюля сменилась: полка обнуляется, потому что стена постеров от чужого
+    /// запроса под новой подписью читается как неверные данные.
     pub fn select(&mut self, tab: BrowseTab) {
         if self.tab == tab {
             return;
         }
         self.tab = tab;
-        self.page = 0;
-        self.total_pages = 0;
         self.releases.clear();
+        self.paging.reset();
         self.related = None;
-        self.loading = false;
     }
 
-    /// A new query means a new first page.
+    /// Новый запрос — новая первая страница.
     pub fn set_query(&mut self, query: String) {
         self.query = query;
     }
 
-    /// `true` when the current shelf can be fetched at all.
+    /// `true`, когда текущую полку вообще можно просить.
     pub fn fetch_allowed(&self) -> bool {
         !self.tab.needs_query() || !self.query.trim().is_empty()
     }
 
-    /// Stores an answer for the current shelf.
-    pub fn apply(&mut self, page: BrowsePage) {
-        self.related = page.related().map(str::to_owned);
-        self.total_pages = page.total_pages();
-        // an answer without a page cursor leaves the requested page in place
-        if let Some(current) = page.page() {
-            self.page = current;
-        }
-        self.releases = page.releases().to_vec();
-        self.loading = false;
+    /// Номер страницы, которую надо просить следующей.
+    pub fn next_page(&self) -> u32 {
+        self.paging.next()
     }
 
-    /// Artwork of the visible shelf.
+    /// Можно ли догружать.
+    pub fn can_load_more(&self) -> bool {
+        self.paging.can_load_more()
+    }
+
+    /// Стартует первый запрос полки.
+    pub fn begin(&mut self) {
+        self.paging.begin();
+    }
+
+    /// Стартует догрузка. `false` — просить нечего.
+    pub fn begin_more(&mut self) -> bool {
+        self.paging.begin_more()
+    }
+
+    /// Кладёт ответ в полку: содержимое дописывается, повторы выбрасываются.
+    ///
+    /// Полки без номера страницы (`/discover/*`) заканчиваются на первом же
+    /// ответе — второй запрос вернул бы тот же список, так что честнее не
+    /// отправлять его вовсе.
+    pub fn apply(&mut self, page: BrowsePage) {
+        self.related = page.related().map(str::to_owned);
+        let added = append_unique(&mut self.releases, page.releases().to_vec(), |release| {
+            release.id
+        });
+        self.paging.finish(added);
+        if !self.tab.is_paged() {
+            self.paging.exhausted = true;
+        }
+    }
+
+    /// Отказ сервера: запрос снят, страница не засчитана.
+    pub fn fail(&mut self) {
+        self.paging.fail();
+    }
+
+    /// Обложки видимой полки.
     pub fn artwork(&self) -> Vec<(String, Option<String>)> {
         self.releases
             .iter()
@@ -144,7 +157,7 @@ impl Browse {
             .collect()
     }
 
-    /// Caption of the empty state, phrased as the action that fills the shelf.
+    /// Подпись пустой полки, сформулированная как действие, которое её наполняет.
     pub fn empty_hint(&self) -> String {
         match self.tab {
             BrowseTab::Search if self.query.trim().is_empty() => {
@@ -171,15 +184,19 @@ impl Browse {
         .to_owned()
     }
 
-    /// Title of the shelf, used both in the app bar and in the busy line.
+    /// Заголовок полки: и в шапке экрана, и в строке загрузки.
     pub fn shelf_title(&self) -> String {
-        match self.tab {
+        let base = match self.tab {
             BrowseTab::Search if !self.query.trim().is_empty() => {
                 format!("Поиск: «{}»", self.query.trim())
             }
             BrowseTab::Catalog => format!("Каталог · {}", catalog_sort_label(self.sort)),
             other => other.label().to_owned(),
-        }
+        };
+        format!(
+            "{base} · {}",
+            util::count_label(self.releases.len() as i64, "релиз", "релиза", "релизов")
+        )
     }
 
     pub fn view<'a>(&'a self, cache: &'a PosterCache) -> Element<'a, Message> {
@@ -202,19 +219,12 @@ impl Browse {
                 .padding(10)
                 .style(crate::theme::styles::input);
             let action = widgets::action(
-                if self.loading {
-                    "Ищу…"
-                } else {
-                    "Искать"
-                },
-                (!self.loading).then_some(Message::SearchSubmit),
+                if self.paging.loading { "Ищу…" } else { "Искать" },
+                (!self.paging.loading).then_some(Message::SearchSubmit),
             );
             body = body.push(widgets::section(
                 "Запрос".to_owned(),
-                Row::new()
-                    .spacing(10)
-                    .push(input)
-                    .push(action),
+                Row::new().spacing(10).push(input).push(action),
             ));
         }
 
@@ -226,10 +236,7 @@ impl Browse {
                     Message::BrowseSort(*id),
                 ))
             });
-            body = body.push(widgets::section(
-                "Сортировка".to_owned(),
-                sorts.wrap(),
-            ));
+            body = body.push(widgets::section("Сортировка".to_owned(), sorts.wrap()));
         }
 
         if let Some(related) = &self.related {
@@ -238,14 +245,11 @@ impl Browse {
             )));
         }
 
-        if self.loading {
-            body = body.push(widgets::busy(format!(
-                "Загрузка: «{}»",
-                self.shelf_title()
-            )));
+        if self.paging.loading {
+            body = body.push(widgets::busy(format!("Загрузка: «{}»", self.shelf_title())));
         }
 
-        if self.releases.is_empty() && !self.loading {
+        if self.releases.is_empty() && !self.paging.loading {
             body = body.push(widgets::empty_state(
                 self.shelf_title(),
                 self.empty_hint(),
@@ -253,20 +257,22 @@ impl Browse {
         }
 
         if !self.releases.is_empty() {
-            body = body
-                .push(widgets::poster_grid(cache, &self.releases, widgets::GRID_COLUMNS));
-
-            if self.tab.is_paged() {
-                body = body.push(widgets::pager(
-                    self.page,
-                    self.total_pages,
-                    Message::BrowsePage(self.page.saturating_sub(1)),
-                    Message::BrowsePage(self.page + 1),
-                ));
-            }
+            body = body.push(widgets::poster_grid(cache, &self.releases, widgets::GRID_COLUMNS));
         }
 
-        widgets::scroll_body(body)
+        let footer = (!self.releases.is_empty()).then(|| {
+            widgets::shelf_tail(
+                self.paging.loading_more,
+                self.paging.exhausted,
+                self.releases.len(),
+            )
+        });
+
+        widgets::scroll_infinite(
+            body,
+            footer,
+            self.can_load_more() && !self.releases.is_empty(),
+        )
     }
 }
 
@@ -283,13 +289,13 @@ mod tests {
         }
     }
 
-    fn shelf(ids: &[i64], current: i32, total: i32) -> Pageable<Release> {
+    fn shelf(ids: &[i64]) -> Pageable<Release> {
         Pageable {
             code: 1,
             content: ids.iter().copied().map(release).collect(),
-            current_page: current,
+            current_page: 0,
             total_count: ids.len() as i64,
-            total_page_count: total,
+            total_page_count: 0,
         }
     }
 
@@ -308,11 +314,10 @@ mod tests {
     fn a_search_answer_carries_its_related_genre_and_no_page_count() {
         let page = BrowsePage::Search(search(&[1, 2]));
         assert_eq!(page.len(), 2);
-        assert_eq!(page.page(), None, "the search endpoint echoes no page cursor");
-        assert_eq!(page.total_pages(), 0, "the endpoint does not count pages");
         assert_eq!(page.related(), Some("Сёнен"));
+        assert!(!page.is_empty());
 
-        // an unnamed related genre is not a caption
+        // безымянная похожая категория — не подпись
         let mut response = search(&[1]);
         response.related.as_mut().unwrap().name = None;
         assert_eq!(BrowsePage::Search(response).related(), None);
@@ -325,20 +330,10 @@ mod tests {
         let mut response = search(&[1]);
         response.related = None;
         assert_eq!(BrowsePage::Search(response).related(), None);
-    }
 
-    #[test]
-    fn a_shelf_answer_carries_its_geometry() {
-        let page = BrowsePage::Shelf(shelf(&[3, 4, 5], 2, 9));
-        assert_eq!(page.len(), 3);
-        assert_eq!(page.page(), Some(2));
-        assert_eq!(page.total_pages(), 9);
-        assert_eq!(page.related(), None);
-        assert!(!page.is_empty());
-
-        let empty = BrowsePage::Shelf(shelf(&[], 0, -4));
+        let empty = BrowsePage::Shelf(shelf(&[]));
         assert!(empty.is_empty());
-        assert_eq!(empty.total_pages(), 0);
+        assert_eq!(empty.len(), 0);
     }
 
     #[test]
@@ -348,6 +343,7 @@ mod tests {
             query: "наруто".to_owned(),
             ..Default::default()
         };
+        browse.begin();
         browse.apply(BrowsePage::Search(search(&[1, 2])));
         assert_eq!(browse.releases.len(), 2);
         assert_eq!(browse.related.as_deref(), Some("Сёнен"));
@@ -355,13 +351,62 @@ mod tests {
         browse.select(BrowseTab::Catalog);
         assert!(browse.releases.is_empty());
         assert_eq!(browse.related, None);
-        assert_eq!((browse.page, browse.total_pages), (0, 0));
-        assert!(!browse.loading);
+        assert_eq!(browse.next_page(), 0);
+        assert!(!browse.paging.loading);
+        assert!(!browse.paging.exhausted);
 
-        // the same pill twice is not a reset
-        browse.apply(BrowsePage::Shelf(shelf(&[7], 1, 3)));
+        // та же пилюля дважды — не сброс
+        browse.begin();
+        browse.apply(BrowsePage::Shelf(shelf(&[7])));
         browse.select(BrowseTab::Catalog);
         assert_eq!(browse.releases.len(), 1);
+    }
+
+    #[test]
+    fn pages_append_and_a_repeat_of_the_last_one_ends_the_shelf() {
+        let mut browse = Browse {
+            tab: BrowseTab::Catalog,
+            ..Default::default()
+        };
+        browse.begin();
+        browse.apply(BrowsePage::Shelf(shelf(&[1, 2])));
+        assert!(browse.begin_more());
+        browse.apply(BrowsePage::Shelf(shelf(&[2, 3])));
+        assert_eq!(
+            browse.releases.iter().map(|r| r.id).collect::<Vec<i64>>(),
+            vec![1, 2, 3]
+        );
+        assert_eq!(browse.next_page(), 2);
+
+        browse.begin_more();
+        browse.apply(BrowsePage::Shelf(shelf(&[3])));
+        assert!(browse.paging.exhausted);
+        assert!(!browse.can_load_more());
+    }
+
+    #[test]
+    fn an_unpaged_discovery_shelf_ends_after_its_single_answer() {
+        for tab in [BrowseTab::Interesting, BrowseTab::Comments] {
+            let mut browse = Browse { tab, ..Default::default() };
+            browse.begin();
+            browse.apply(BrowsePage::Shelf(shelf(&[1, 2, 3])));
+            assert_eq!(browse.releases.len(), 3, "{tab}");
+            assert!(
+                browse.paging.exhausted,
+                "{tab} не принимает номер страницы — догружать некуда"
+            );
+            assert!(!browse.can_load_more());
+        }
+
+        // каталог и поиск, наоборот, продолжают просить
+        let mut catalog = Browse {
+            tab: BrowseTab::Catalog,
+            ..Default::default()
+        };
+        catalog.begin();
+        catalog.apply(BrowsePage::Shelf(shelf(&[1, 2, 3])));
+        assert!(!catalog.paging.exhausted);
+        assert!(catalog.can_load_more());
     }
 
     #[test]
@@ -370,7 +415,7 @@ mod tests {
         assert_eq!(browse.tab, BrowseTab::Search);
         assert!(
             !browse.fetch_allowed(),
-            "an empty query must not go out to /search/releases"
+            "пустой запрос не должен уходить в /search/releases"
         );
         browse.query = "  ".to_owned();
         assert!(!browse.fetch_allowed());
@@ -384,8 +429,25 @@ mod tests {
         ] {
             browse.tab = tab;
             browse.query.clear();
-            assert!(browse.fetch_allowed(), "{tab} needs no query");
+            assert!(browse.fetch_allowed(), "{tab} запроса не требует");
         }
+    }
+
+    #[test]
+    fn a_failed_page_keeps_what_was_already_gathered() {
+        let mut browse = Browse {
+            tab: BrowseTab::Catalog,
+            ..Default::default()
+        };
+        browse.begin();
+        browse.apply(BrowsePage::Shelf(shelf(&[1, 2])));
+        assert!(browse.begin_more());
+        browse.fail();
+
+        assert_eq!(browse.releases.len(), 2);
+        assert_eq!(browse.next_page(), 1);
+        assert!(!browse.paging.loading_more);
+        assert!(browse.can_load_more());
     }
 
     #[test]
@@ -394,13 +456,14 @@ mod tests {
             tab: BrowseTab::Catalog,
             ..Default::default()
         };
-        browse.apply(BrowsePage::Shelf(shelf(&[1, 2, 3], 0, 1)));
+        browse.begin();
+        browse.apply(BrowsePage::Shelf(shelf(&[1, 2, 3])));
         let artwork = browse.artwork();
         assert_eq!(artwork.len(), 3);
         assert_eq!(artwork[0].0, posters::release_key(1));
         assert_eq!(artwork[2].1.as_deref(), Some("https://cdn/anixart/3.jpg"));
 
-        // an article and a release with the same numeric id stay apart
+        // пустой URL — не URL
         browse.releases[0].image = Some(String::new());
         assert_eq!(browse.artwork()[0].1, None);
     }
@@ -412,19 +475,23 @@ mod tests {
             query: "  БЛЕАЧ  ".to_owned(),
             ..Default::default()
         };
-        assert_eq!(browse.shelf_title(), "Поиск: «БЛЕАЧ»");
+        assert_eq!(browse.shelf_title(), "Поиск: «БЛЕАЧ» · 0 релизов");
 
         browse.query.clear();
-        assert_eq!(browse.shelf_title(), "Поиск");
+        assert_eq!(browse.shelf_title(), "Поиск · 0 релизов");
 
         browse.tab = BrowseTab::Catalog;
         browse.sort = 1;
-        assert_eq!(browse.shelf_title(), "Каталог · По оценке");
+        assert_eq!(browse.shelf_title(), "Каталог · По оценке · 0 релизов");
         browse.sort = 77;
-        assert_eq!(browse.shelf_title(), "Каталог · Сортировка");
+        assert_eq!(browse.shelf_title(), "Каталог · Сортировка · 0 релизов");
 
         browse.tab = BrowseTab::Comments;
-        assert_eq!(browse.shelf_title(), "Обсуждаемое");
+        assert_eq!(browse.shelf_title(), "Обсуждаемое · 0 релизов");
+
+        browse.begin();
+        browse.apply(BrowsePage::Shelf(shelf(&[1, 2])));
+        assert_eq!(browse.shelf_title(), "Обсуждаемое · 2 релиза");
     }
 
     #[test]
@@ -454,19 +521,29 @@ mod tests {
             let mut browse = Browse {
                 tab,
                 query: "наруто".to_owned(),
-                loading: true,
                 ..Default::default()
             };
+            browse.paging.loading = true;
             let _ = browse.view(&cache);
 
-            browse.loading = false;
+            browse.paging.loading = false;
             let _ = browse.view(&cache);
 
+            browse.begin();
             browse.apply(match tab {
                 BrowseTab::Search => BrowsePage::Search(search(&[1, 2, 3])),
-                _ => BrowsePage::Shelf(shelf(&[1, 2, 3, 4, 5, 6], 0, 4)),
+                _ => BrowsePage::Shelf(shelf(&[1, 2, 3, 4, 5, 6])),
             });
-            let _ = browse.view(&cache);
+            let _first = browse.view(&cache);
+
+            if browse.can_load_more() {
+                browse.begin_more();
+                let _more = browse.view(&cache);
+                browse.apply(BrowsePage::Shelf(shelf(&[])));
+            } else {
+                browse.apply(BrowsePage::Shelf(shelf(&[])));
+            }
+            let _tail = browse.view(&cache);
         }
     }
 }

@@ -49,13 +49,13 @@ pub fn run() -> iced::Result {
 
 #[cfg(test)]
 mod app_tests {
-    use crate::app::{play_with_mpv, App, Message, Screen};
-    use crate::lists::BrowseTab;
+    use crate::app::{mpv_arguments, play_with_mpv, App, Message, Screen};
+    use crate::lists::{BrowseTab, FeedCategory};
     use crate::login::{LoginMethod, PasteTarget};
     use crate::release::ReleaseView;
     use crate::session::SessionStore;
 
-    use anixart_core::{FeedItem, Pageable};
+    use anixart_core::{Pageable, Release};
     use anixart_parsers::{ParsedVideo, VideoSource};
 
     /// Хранилище в временном каталоге: своя папка на каждый тест.
@@ -139,40 +139,45 @@ mod app_tests {
         assert_eq!(app.token.as_deref(), Some("token-xyz"));
         assert_eq!(app.screen, Screen::Feed);
         assert!(app.stack.is_empty());
-        assert!(app.feed.loading);
-        assert_eq!(app.feed.page, 0);
+        assert!(app.feed.paging.loading);
+        assert_eq!(app.feed.paging.pages, 0);
         assert!(app.login.password.is_empty());
         assert!(!app.login.loading);
     }
 
     #[test]
-    fn feed_loaded_stores_items_and_pages() {
+    fn feed_loaded_stores_releases_and_the_page_that_brought_them() {
         let mut app = App::with_store(SessionStore::disabled());
         let pageable = Pageable {
             code: 0,
-            content: vec![FeedItem {
+            content: vec![Release {
                 id: 1,
-                title: Some("Новый сезон".into()),
+                title_ru: Some("Новый сезон".into()),
                 ..Default::default()
             }],
             current_page: 0,
-            total_count: 1,
-            total_page_count: 3,
+            total_count: 0,
+            // живой `POST /filter` всегда отвечает нулём: полка верит не ему
+            total_page_count: 0,
         };
-        let _ = app.update(Message::FeedLoaded(Ok(pageable)));
+        let _ = app.update(Message::FeedLoaded(FeedCategory::Actual, Ok(pageable)));
 
-        assert_eq!(app.feed.items.len(), 1);
-        assert_eq!(app.feed.total_pages, 3);
-        assert!(!app.feed.loading);
+        assert_eq!(app.feed.releases.len(), 1);
+        assert_eq!(app.feed.paging.pages, 1);
+        assert!(!app.feed.paging.loading);
+        assert!(!app.feed.paging.exhausted, "полная страница — не конец");
     }
 
     #[test]
     fn feed_error_clears_loading() {
         let mut app = App::with_store(SessionStore::disabled());
-        app.feed.loading = true;
-        let _ = app.update(Message::FeedLoaded(Err("офлайн".into())));
+        app.feed.begin();
+        let _ = app.update(Message::FeedLoaded(
+            FeedCategory::Actual,
+            Err("офлайн".into()),
+        ));
 
-        assert!(!app.feed.loading);
+        assert!(!app.feed.paging.loading);
         assert_eq!(app.error.as_deref(), Some("офлайн"));
     }
 
@@ -185,8 +190,8 @@ mod app_tests {
         let _ = app.update(Message::SearchQuery("   ".into()));
         let _ = app.update(Message::SearchSubmit);
 
-        assert!(!app.browse.loading);
-        assert_eq!(app.browse.page, 0);
+        assert!(!app.browse.paging.loading);
+        assert_eq!(app.browse.paging.pages, 0);
     }
 
     #[test]
@@ -223,7 +228,7 @@ mod app_tests {
         assert!(app.token.is_none());
         assert!(app.stack.is_empty());
         assert!(app.error.is_none());
-        assert!(app.feed.items.is_empty());
+        assert!(app.feed.releases.is_empty());
         assert!(app.release.release.is_none());
     }
 
@@ -260,21 +265,64 @@ mod app_tests {
             playing: Some(1),
             ..Default::default()
         };
-        app.screen = Screen::Release;
-        app.stack = vec![Screen::Browse];
+        app.screen = Screen::Sources;
+        app.stack = vec![Screen::Browse, Screen::Release];
 
+        // на экране источников первой сворачивается серия
         let _ = app.update(Message::ReleaseBack);
         assert!(app.release.selected_source.is_none());
         assert!(app.release.episodes.is_empty());
         assert_eq!(app.release.selected_type, Some(0));
-        assert_eq!(app.screen, Screen::Release);
+        assert_eq!(app.screen, Screen::Sources);
 
+        // вторая ступень — назад к озвучкам, то есть на страницу релиза
         let _ = app.update(Message::ReleaseBack);
         assert!(app.release.selected_type.is_none());
+        assert_eq!(app.screen, Screen::Release);
 
-        // Третье нажатие закрывает саму страницу.
+        // со страницы релиза отступать некуда: третья нажатие закрывает её
         let _ = app.update(Message::ReleaseBack);
         assert_eq!(app.screen, Screen::Browse);
+    }
+
+    #[test]
+    fn the_variant_choice_stays_on_the_release_page_until_a_voiceover_is_picked() {
+        let mut app = App::with_store(SessionStore::disabled());
+        let _ = app.update(Message::Nav(Screen::Browse));
+        let _ = app.update(Message::OpenRelease(3));
+        let _ = app.update(Message::ReleaseLoaded(Ok(Box::new(Release {
+            id: 3,
+            title_ru: Some("Наруто".into()),
+            ..Default::default()
+        }))));
+        assert!(app.release.loading_types);
+
+        let _ = app.update(Message::TypesLoaded(Ok(vec![
+            anixart_core::EpisodeType {
+                id: 5,
+                name: "AniDUB".into(),
+                is_sub: false,
+                ..Default::default()
+            },
+            anixart_core::EpisodeType {
+                id: 6,
+                name: "Субтитры | AniDUB".into(),
+                is_sub: true,
+                ..Default::default()
+            },
+        ])));
+
+        let _ = app.update(Message::ReleaseChoose);
+        assert!(app.release.choosing);
+        assert_eq!(app.screen, Screen::Release, "пока выбран только способ просмотра");
+
+        let _ = app.update(Message::SelectVariant(crate::lists::VariantFilter::Subtitle));
+        assert_eq!(app.release.visible_types().len(), 1);
+        assert_eq!(app.screen, Screen::Release);
+
+        let _ = app.update(Message::SelectType(1));
+        assert_eq!(app.screen, Screen::Sources, "озвучка выбрана — экран свой");
+        assert!(app.release.loading_sources);
     }
 
     #[test]
@@ -302,7 +350,24 @@ mod app_tests {
     fn mpv_needs_a_resolved_stream() {
         let video = ParsedVideo::new(VideoSource::Direct);
         assert!(video.best_url().is_none());
-        assert!(play_with_mpv(&video).is_err());
+        assert!(play_with_mpv(&video, "Наруто — №1").is_err());
+    }
+
+    #[test]
+    fn mpv_is_started_with_a_window_and_a_readable_title() {
+        let video = ParsedVideo::new(VideoSource::Kodik)
+            .with_quality("Default", "https://kodik.example/1.mp4")
+            .with_header("Referer", "https://kodik.info/");
+
+        let arguments = mpv_arguments(&video, "Наруто — №12 · Битва за Коноху").unwrap();
+        assert_eq!(arguments[0], "--force-window=immediate");
+        assert_eq!(arguments[1], "--title=Наруто — №12 · Битва за Коноху");
+        assert_eq!(arguments[2], "https://kodik.example/1.mp4");
+        assert_eq!(arguments[3], "--http-header-fields=Referer: https://kodik.info/");
+
+        // пустая подпись не рождает голого тире в заголовке окна
+        let arguments = mpv_arguments(&video, "   ").unwrap();
+        assert_eq!(arguments[1], "https://kodik.example/1.mp4");
     }
 
     #[test]
@@ -533,7 +598,7 @@ mod app_tests {
 
         assert_eq!(app.token.as_deref(), Some("tok-direct"));
         assert_eq!(app.screen, Screen::Feed);
-        assert!(app.feed.loading);
+        assert!(app.feed.paging.loading);
         assert!(app.error.is_none());
         assert!(app.status.as_deref().unwrap().contains("Токен"));
     }
@@ -553,7 +618,7 @@ mod app_tests {
         assert_eq!(app.login.token, "tok-clipboard");
         assert_eq!(app.token.as_deref(), Some("tok-clipboard"));
         assert_eq!(app.screen, Screen::Feed);
-        assert!(app.feed.loading);
+        assert!(app.feed.paging.loading);
         assert!(app.error.is_none());
     }
 
@@ -674,7 +739,7 @@ mod app_tests {
         let _ = reopened.restore_session();
         assert_eq!(reopened.token.as_deref(), Some("tok-telegram"));
         assert_eq!(reopened.screen, Screen::Feed);
-        assert!(reopened.feed.loading);
+        assert!(reopened.feed.paging.loading);
         assert!(reopened.status.as_deref().unwrap().contains("telegram"));
 
         // Выход стирает файл.

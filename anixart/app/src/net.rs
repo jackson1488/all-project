@@ -17,12 +17,12 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use anixart_core::{
-    oauth, AnixartClient, Collection, Episode, EpisodeType, FeedItem, FilterRequest, Pageable,
+    oauth, AnixartClient, Collection, Episode, EpisodeType, FilterRequest, Pageable,
     ProfileInfoResponse, Release, ReleaseSearchResponse, SocialSignInResponse, Source,
 };
 use anixart_parsers::ParsedVideo;
 
-use crate::lists::{BookmarkTab, DiscoverKind, FeedCategory, WatchStatus};
+use crate::lists::{BookmarkTab, DiscoverKind, WatchStatus};
 use crate::login::{google_callback_error, google_credential_from, random_verifier};
 use crate::profile::ProfileSnapshot;
 
@@ -745,12 +745,6 @@ fn read_clipboard_blocking() -> Result<String, String> {
     })
 }
 
-/// `GET /article/all/{page}` — feed page.
-pub async fn feed(token: Option<String>, page: u32) -> Result<Pageable<FeedItem>, String> {
-    let client = api_client(token)?;
-    client.feed(page).await.map_err(|e| e.to_string())
-}
-
 /// `POST /search/releases/{page}` — release search.
 pub async fn search(
     token: Option<String>,
@@ -820,21 +814,6 @@ pub async fn episodes(
         .await
         .map(|r| r.episodes)
         .map_err(|e| e.to_string())
-}
-
-/// One «Главная» category: the latest-articles endpoint for [`FeedCategory::Latest`],
-/// `feed/all` with the window's `date` for the rest.
-pub async fn feed_window(
-    token: Option<String>,
-    category: FeedCategory,
-    page: u32,
-) -> Result<Pageable<FeedItem>, String> {
-    let client = api_client(token)?;
-    let fetched = match category.date() {
-        None => client.feed(page).await,
-        Some(date) => client.feed_all(page, None, date).await,
-    };
-    fetched.map_err(|e| e.to_string())
 }
 
 /// Poster, cover or avatar bytes from the Anixart CDN.
@@ -981,16 +960,24 @@ pub async fn history_delete(token: Option<String>, release_id: i64) -> Result<()
     Ok(())
 }
 
-/// `POST /filter/{page}` — the catalogue shelf of «Обзор».
+/// `POST /filter/{page}` — a catalogue shelf: the «Обзор» filter and every
+/// «Главная» pill alike.
+///
+/// The body is the caller's [`FilterRequest`] verbatim, because a home shelf is a
+/// filter and nothing else: [`crate::lists::FeedCategory::filter`] builds one, the
+/// catalogue sort builds another. Core serialises the snake_case names the live
+/// endpoint reads (`status_id`, `category_id`, `country`, `episodes_from` …) and
+/// skips the fields left `None`, so an unfettered shelf posts just `{ "sort": 0 }`.
+///
+/// No token is needed: this is the shelf a guest opens «Главную» on.
 pub async fn filter_releases(
     token: Option<String>,
     page: u32,
-    sort: i32,
+    filter: FilterRequest,
 ) -> Result<Pageable<Release>, String> {
     let client = api_client(token)?;
-    let request = FilterRequest { sort, ..Default::default() };
     client
-        .filter_releases(page, &request, None)
+        .filter_releases(page, &filter, None)
         .await
         .map_err(|e| e.to_string())
 }

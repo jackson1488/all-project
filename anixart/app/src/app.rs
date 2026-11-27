@@ -26,7 +26,8 @@
 use std::process::{Command, Stdio};
 
 use anixart_core::{
-    Collection, Episode, EpisodeType, FeedItem, Pageable, Release, ReleaseSearchResponse, Source,
+    Collection, Episode, EpisodeType, FilterRequest, Pageable, Release, ReleaseSearchResponse,
+    Source,
 };
 use anixart_parsers::ParsedVideo;
 use iced::widget::{button, container, horizontal_space, vertical_space, Column, Row};
@@ -34,12 +35,12 @@ use iced::{alignment, Element, Length, Task, Theme};
 
 use crate::bookmarks::{BookmarkPage, Bookmarks};
 use crate::feed::Feed;
-use crate::lists::{BookmarkTab, BrowseTab, FeedCategory, WatchStatus};
+use crate::lists::{BookmarkTab, BrowseTab, FeedCategory, VariantFilter, WatchStatus};
 use crate::login::{Login, LoginMethod, PasteTarget, TelegramPaste};
 use crate::net;
 use crate::posters::{self, PosterCache, PosterEffect};
 use crate::profile::{ProfileSnapshot, ProfileView};
-use crate::release::ReleaseView;
+use crate::release::{Back, ReleaseView};
 use crate::search::{Browse, BrowsePage};
 use crate::session::SessionStore;
 use crate::theme;
@@ -51,7 +52,7 @@ const RAIL_WIDTH: f32 = 210.0;
 
 /// Экраны клиента.
 ///
-/// Первые четыре — корневые, они же пилюли навигационной панели; остальные два
+/// Первые четыре — корневые, они же пилюли навигационной панели; остальные три
 /// открываются поверх них и возвращаются стеком.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Screen {
@@ -62,6 +63,9 @@ pub enum Screen {
     Bookmarks,
     Profile,
     Release,
+    /// Отдельный экран «Источники и серии» выбранной озвучки — вторая ступень
+    /// спуска, на которую уводит выбор варианта на странице релиза.
+    Sources,
     Collection,
 }
 
@@ -83,6 +87,7 @@ impl Screen {
             Screen::Bookmarks => "Закладки",
             Screen::Profile => "Профиль",
             Screen::Release => "Релиз",
+            Screen::Sources => "Источники и серии",
             Screen::Collection => "Коллекция",
         }
     }
@@ -162,21 +167,26 @@ pub enum Message {
 
     // ── «Главная» ──────────────────────────────────────────────────────────
     FeedCategory(FeedCategory),
-    FeedPage(usize),
-    FeedLoaded(Result<Pageable<FeedItem>, String>),
+    /// Ответ полки вместе с той пилюлей, которая его запросила: список *дописывается*,
+    /// поэтому запоздавший ответ чужой полки попал бы под чужой заголовок, а не
+    /// заменил собой текущий.
+    FeedLoaded(FeedCategory, Result<Pageable<Release>, String>),
 
     // ── «Обзор» ────────────────────────────────────────────────────────────
     BrowseTab(BrowseTab),
     BrowseSort(i32),
-    BrowsePage(usize),
     SearchQuery(String),
     SearchSubmit,
-    SearchLoaded(Result<BrowsePage, String>),
+    SearchLoaded(BrowseTab, Result<BrowsePage, String>),
 
     // ── «Закладки» ─────────────────────────────────────────────────────────
     BookmarkTab(BookmarkTab),
-    BookmarkPage(usize),
-    BookmarkLoaded(Result<BookmarkPage, String>),
+    BookmarkLoaded(BookmarkTab, Result<BookmarkPage, String>),
+
+    /// Прокрутка бесконечной полки: доля прокрученного вьюпорта. Кнопок
+    /// перелистывания нет — следующая страница просится сама, когда пользователь
+    /// дошёл до низа ([`widgets::reached_end`]).
+    Scrolled(f32),
 
     // ── «Профиль» ──────────────────────────────────────────────────────────
     ProfileLoaded(Result<ProfileSnapshot, String>),
@@ -184,6 +194,10 @@ pub enum Message {
     // ── Релиз ──────────────────────────────────────────────────────────────
     OpenRelease(i64),
     ReleaseLoaded(Result<Box<Release>, String>),
+    /// Кнопка «Воспроизвести»: раскрывает ряд «Выберите вариант».
+    ReleaseChoose,
+    /// Одна из пилюль «Все / Озвучки / Субтитры» — только фильтр списка озвучек.
+    SelectVariant(VariantFilter),
     ReleaseBack,
     TypesLoaded(Result<Vec<EpisodeType>, String>),
     SelectType(usize),
@@ -232,38 +246,72 @@ pub struct App {
     pub store: SessionStore,
 }
 
+/// Полка «Главной» → её сообщение: пилюля, которая запросила ответ, едет вместе с
+/// ним, потому что список дописывается, а не заменяется.
+fn feed_loaded(category: FeedCategory, result: Result<Pageable<Release>, String>) -> Message {
+    Message::FeedLoaded(category, result)
+}
+
 /// `POST /search/releases/{page}` → сообщение «Обзора».
-fn search_loaded(result: Result<ReleaseSearchResponse, String>) -> Message {
-    Message::SearchLoaded(result.map(BrowsePage::Search))
+fn search_loaded(tab: BrowseTab, result: Result<ReleaseSearchResponse, String>) -> Message {
+    Message::SearchLoaded(tab, result.map(BrowsePage::Search))
 }
 
 /// Полка релизов (`/filter`, `/discover`, списки профиля) → сообщение «Обзора».
-fn shelf_loaded(result: Result<Pageable<Release>, String>) -> Message {
-    Message::SearchLoaded(result.map(BrowsePage::Shelf))
+fn shelf_loaded(tab: BrowseTab, result: Result<Pageable<Release>, String>) -> Message {
+    Message::SearchLoaded(tab, result.map(BrowsePage::Shelf))
 }
 
 /// Таб «Закладок» с релизами → своё сообщение.
-fn releases_loaded(result: Result<Pageable<Release>, String>) -> Message {
-    Message::BookmarkLoaded(result.map(BookmarkPage::Releases))
+fn releases_loaded(
+    tab: BookmarkTab,
+    result: Result<Pageable<Release>, String>,
+) -> Message {
+    Message::BookmarkLoaded(tab, result.map(BookmarkPage::Releases))
 }
 
 /// Таб «Закладок» с коллекциями → своё сообщение.
-fn collections_loaded(result: Result<Pageable<Collection>, String>) -> Message {
-    Message::BookmarkLoaded(result.map(BookmarkPage::Collections))
+fn collections_loaded(
+    tab: BookmarkTab,
+    result: Result<Pageable<Collection>, String>,
+) -> Message {
+    Message::BookmarkLoaded(tab, result.map(BookmarkPage::Collections))
 }
 
-/// Передача лучшей найденной ссылки внешнему процессу `mpv` с заголовками, которые
-/// собрал решатель (Referer / User-Agent и прочее).
-pub fn play_with_mpv(video: &ParsedVideo) -> Result<(), String> {
+/// Аргументы, с которыми стартует `mpv`, — вынесены отдельно от запуска, потому что
+/// ровно они и есть «лучшее качество, форсированное окно, русский заголовок»:
+///
+/// * `--force-window=immediate` — окно показывается сразу, ещё до первой декады
+///   кадров. Без него `mpv` на сетевой ссылке стартует в терминале, и пользователь
+///   видит пустоту, пока буфер не наполнится.
+/// * `--title=<Релиз — Серия>` — заголовок окна и списка окон, поэтому серию
+///   узнаёшь среди прочих приложений, не заглядывая в плеер. Пустая подпись не
+///   рождает аргумента с голым тире.
+/// * `--http-header-fields=…` — заголовки, которые собрал решатель (Referer,
+///   User-Agent и прочее), без них часть хостов отдаёт 403.
+///
+/// Ошибка — «ни одной играбельной ссылки», когда решатель не принёс ничего.
+pub fn mpv_arguments(video: &ParsedVideo, caption: &str) -> Result<Vec<String>, String> {
     let url = video
         .best_url()
         .ok_or_else(|| "Ни одной играбельной ссылки не найдено".to_owned())?;
 
-    let mut command = Command::new("mpv");
-    command.arg(url);
-    for (name, value) in &video.headers {
-        command.arg(format!("--http-header-fields={name}: {value}"));
+    let mut arguments = vec!["--force-window=immediate".to_owned()];
+    let title = caption.trim();
+    if !title.is_empty() {
+        arguments.push(format!("--title={title}"));
     }
+    arguments.push(url.to_owned());
+    for (name, value) in &video.headers {
+        arguments.push(format!("--http-header-fields={name}: {value}"));
+    }
+    Ok(arguments)
+}
+
+/// Передача лучшей найденной ссылки внешнему процессу `mpv`.
+pub fn play_with_mpv(video: &ParsedVideo, caption: &str) -> Result<(), String> {
+    let mut command = Command::new("mpv");
+    command.args(mpv_arguments(video, caption)?);
 
     command
         .spawn()
@@ -362,7 +410,7 @@ impl App {
                 self.token = Some(session.token);
                 self.mark_signed_in();
                 self.screen = Screen::Feed;
-                self.fetch_feed(0)
+                self.fetch_feed(false)
             }
             None => Task::none(),
         }
@@ -583,7 +631,7 @@ impl App {
             }
             Message::GuestSkip => {
                 // Гостевой сеанс: токена нет, поэтому библиотечные полки остаются
-                // с гостевой подсказкой, а «Обзор» открывается каталогом — полкой,
+                // с гостевой подсказкой, а «Главная» открывается каталогом — полкой,
                 // которой не нужен ни токен, ни запрос.
                 self.token = None;
                 self.stack.clear();
@@ -595,15 +643,14 @@ impl App {
                 self.collection = None;
                 self.collection_loading = false;
                 self.posters.clear();
-                self.screen = Screen::Browse;
-                self.browse = Browse::default();
-                self.browse.select(BrowseTab::Catalog);
+                self.screen = Screen::Feed;
+                self.feed = Feed::default();
                 self.status = Some(
                     "Гостевой сеанс: «Главная» и «Обзор» читаются без входа, \
                      «Закладки» и «Профиль» откроются после него."
                         .to_owned(),
                 );
-                self.fetch_browse(0)
+                self.fetch_feed(false)
             }
 
             // ── Навигация ──────────────────────────────────────────────────
@@ -612,20 +659,19 @@ impl App {
                 self.error = None;
                 match screen {
                     Screen::Feed
-                        if self.feed.items.is_empty() && !self.feed.loading =>
+                        if self.feed.releases.is_empty() && !self.feed.paging.loading =>
                     {
-                        let page = self.feed.page_for(self.feed.category);
-                        self.fetch_feed(page)
+                        self.fetch_feed(false)
                     }
                     Screen::Browse
-                        if self.browse.releases.is_empty() && !self.browse.loading =>
+                        if self.browse.releases.is_empty() && !self.browse.paging.loading =>
                     {
-                        self.fetch_browse(0)
+                        self.fetch_browse(false)
                     }
                     Screen::Bookmarks
-                        if self.bookmarks.is_empty() && !self.bookmarks.loading =>
+                        if self.bookmarks.is_empty() && !self.bookmarks.paging.loading =>
                     {
-                        self.fetch_bookmarks(0)
+                        self.fetch_bookmarks(false)
                     }
                     Screen::Profile
                         if self.profile.snapshot.is_none() && !self.profile.loading =>
@@ -648,70 +694,119 @@ impl App {
 
             // ── «Главная» ──────────────────────────────────────────────────
             Message::FeedCategory(category) => {
-                let page = self.feed.page_for(category);
-                self.feed.category = category;
+                let changed = self.feed.category != category;
+                self.feed.select(category);
                 self.error = None;
-                self.fetch_feed(page)
+                if changed {
+                    self.fetch_feed(false)
+                } else {
+                    Task::none()
+                }
             }
-            Message::FeedPage(page) => self.fetch_feed(page),
-            Message::FeedLoaded(Ok(page)) => {
-                self.feed.apply(page);
-                Task::none()
-            }
-            Message::FeedLoaded(Err(error)) => {
-                self.feed.loading = false;
-                self.error = Some(error);
+            Message::FeedLoaded(category, result) => {
+                // Ответ чужой полки — не ответ: он мог уйти до смены пилюли и,
+                // будучи дописанным, показал бы релизы под неверным заголовком.
+                if category != self.feed.category {
+                    return Task::none();
+                }
+                match result {
+                    Ok(page) => self.feed.apply(page),
+                    Err(error) => {
+                        self.feed.fail();
+                        self.error = Some(error);
+                    }
+                }
                 Task::none()
             }
 
             // ── «Обзор» ────────────────────────────────────────────────────
             Message::BrowseTab(tab) => {
+                let changed = self.browse.tab != tab;
                 self.browse.select(tab);
                 self.error = None;
-                self.fetch_browse(0)
+                if changed {
+                    self.fetch_browse(false)
+                } else {
+                    Task::none()
+                }
             }
             Message::BrowseSort(sort) => {
+                let changed = self.browse.sort != sort;
                 self.browse.sort = sort;
                 self.error = None;
-                self.fetch_browse(0)
+                if changed {
+                    self.browse.releases.clear();
+                    self.browse.paging.reset();
+                    self.fetch_browse(false)
+                } else {
+                    Task::none()
+                }
             }
-            Message::BrowsePage(page) => self.fetch_browse(page),
             Message::SearchQuery(query) => {
                 self.browse.set_query(query);
                 Task::none()
             }
-            Message::SearchSubmit => self.fetch_browse(0),
-            Message::SearchLoaded(Ok(page)) => {
-                self.browse.apply(page);
-                Task::none()
-            }
-            Message::SearchLoaded(Err(error)) => {
-                self.browse.loading = false;
-                self.error = Some(error);
+            Message::SearchSubmit => self.fetch_browse(false),
+            Message::SearchLoaded(tab, result) => {
+                if tab != self.browse.tab {
+                    return Task::none();
+                }
+                match result {
+                    Ok(page) => self.browse.apply(page),
+                    Err(error) => {
+                        self.browse.fail();
+                        self.error = Some(error);
+                    }
+                }
                 Task::none()
             }
 
             // ── «Закладки» ─────────────────────────────────────────────────
             Message::BookmarkTab(tab) => {
+                let changed = self.bookmarks.tab != tab;
                 self.bookmarks.select(tab);
                 self.error = None;
-                self.fetch_bookmarks(0)
-            }
-            Message::BookmarkPage(page) => self.fetch_bookmarks(page),
-            Message::BookmarkLoaded(Ok(page)) => {
-                // Ответ, пришедший после смены таба, не должен лечь под чужой
-                // заголовок — он просто снимает флаг загрузки.
-                if page.fits(self.bookmarks.tab) {
-                    self.bookmarks.apply(page);
+                if changed {
+                    self.fetch_bookmarks(false)
                 } else {
-                    self.bookmarks.loading = false;
+                    Task::none()
+                }
+            }
+            Message::BookmarkLoaded(tab, result) => {
+                // Запоздавший ответ чужого таба отбрасывается целиком: полка
+                // дописывается, и чужие объекты влезли бы в неё без единой подписи.
+                if tab != self.bookmarks.tab {
+                    return Task::none();
+                }
+                match result {
+                    Ok(page) => {
+                        if page.fits(self.bookmarks.tab) {
+                            self.bookmarks.apply(page);
+                        } else {
+                            self.bookmarks.fail();
+                        }
+                    }
+                    Err(error) => {
+                        self.bookmarks.fail();
+                        self.error = Some(error);
+                    }
                 }
                 Task::none()
             }
-            Message::BookmarkLoaded(Err(error)) => {
-                self.bookmarks.loading = false;
-                self.error = Some(error);
-                Task::none()
+
+            // ── Бесконечная прокрутка ──────────────────────────────────────
+            Message::Scrolled(offset) => {
+                // Уведомление приходит на каждый кадр прокрутки, поэтому решение
+                // «пора догружать» принимается один раз и только у низа полки.
+                if !widgets::reached_end(offset) {
+                    return Task::none();
+                }
+                match self.screen {
+                    Screen::Feed => self.load_more_feed(),
+                    Screen::Browse => self.load_more_browse(),
+                    Screen::Bookmarks => self.load_more_bookmarks(),
+                    _ => Task::none(),
+                }
             }
 
             // ── «Профиль» ──────────────────────────────────────────────────
@@ -750,6 +845,28 @@ impl App {
                 self.error = Some(error);
                 Task::none()
             }
+            Message::ReleaseChoose => {
+                // «Воспроизвести» только раскрывает ряд вариантов: список озвучек
+                // уже на экране, источники и серии придут следующим шагом.
+                self.release.choose_variant(VariantFilter::default());
+                self.error = None;
+                if self.release.types.is_empty() && !self.release.loading_types {
+                    let Some(release_id) = self.release.release_id() else {
+                        return Task::none();
+                    };
+                    self.release.loading_types = true;
+                    return Task::perform(
+                        net::types(self.token.clone(), release_id),
+                        Message::TypesLoaded,
+                    );
+                }
+                Task::none()
+            }
+            Message::SelectVariant(variant) => {
+                self.release.choose_variant(variant);
+                self.error = None;
+                Task::none()
+            }
             Message::TypesLoaded(Ok(types)) => {
                 self.release.types = types;
                 self.release.loading_types = false;
@@ -776,6 +893,9 @@ impl App {
                 self.release.playing = None;
                 self.release.pending = None;
                 self.release.loading_sources = true;
+                // Озвучка выбрана — экран становится отдельным: на нём источники
+                // этой озвучки и, под ними, серии выбранного источника.
+                self.push_screen(Screen::Sources);
 
                 Task::perform(
                     net::sources(self.token.clone(), release_id, type_id),
@@ -849,10 +969,15 @@ impl App {
             }
             Message::PlaybackResolved(Ok(video)) => {
                 let pending = self.release.pending.take();
-                match play_with_mpv(&video) {
+                let caption = self.playback_caption(pending);
+
+                match play_with_mpv(&video, &caption) {
                     Ok(()) => {
                         self.release.playing = pending;
                         self.error = None;
+                        // Просмотр начался: это не ошибка, но пользователю полезно
+                        // знать, что плеер поднят и что именно он играет.
+                        self.status = Some(format!("mpv запущен: {caption}"));
                     }
                     Err(error) => {
                         self.error = Some(error);
@@ -960,10 +1085,19 @@ impl App {
                 Task::none()
             }
             Message::ReleaseBack => {
-                // Спуск сворачивается по одной ступени, и только потом закрывается
-                // сама страница.
-                if !self.release.collapse() {
-                    self.pop_screen();
+                // Спуск сворачивается по одной ступени: серии → экран источников →
+                // озвучки, и только потом закрывается сама страница релиза.
+                let at_sources = self.screen == Screen::Sources;
+                match self.release.back(at_sources) {
+                    Back::Sources => {}
+                    // Назад к озвучкам — это вниз на один экран, если мы на
+                    // источниках; со страницы релиза отступать некуда.
+                    Back::Voiceovers => {
+                        if at_sources {
+                            self.pop_screen();
+                        }
+                    }
+                    Back::Close => self.pop_screen(),
                 }
                 Task::none()
             }
@@ -1166,72 +1300,134 @@ impl App {
             }
         }
 
-        self.fetch_feed(0)
+        self.fetch_feed(false)
     }
 
-    /// Одна страница «Главной» в текущем датированном окне.
-    fn fetch_feed(&mut self, page: usize) -> Task<Message> {
-        self.feed.page = page;
-        self.feed.loading = true;
+    /// Заголовок окна `mpv`: «Релиз — Серия». Пустая подпись серии не порождает
+    /// хвоста с тире, а релиз, который ещё не пришёл, зовётся просто «Серия».
+    fn playback_caption(&self, index: Option<usize>) -> String {
+        let episode = index
+            .and_then(|index| self.release.episode_label(index))
+            .unwrap_or_else(|| "Серия".to_owned());
+        match self.release.title() {
+            Some(title) => format!("{title} — {episode}"),
+            None => episode,
+        }
+    }
+
+    /// Первая страница полки «Главная» или её догрузка.
+    ///
+    /// `POST /filter/{page}` не требует токена, поэтому полка одинаково работает и
+    /// у вошедшего пользователя, и у гостя. Страница берётся из самой полки:
+    /// `false` начинает её заново, `true` просит следующую.
+    fn fetch_feed(&mut self, more: bool) -> Task<Message> {
+        if more {
+            if !self.feed.begin_more() {
+                return Task::none();
+            }
+        } else {
+            self.feed.begin();
+        }
+
         let category = self.feed.category;
+        let page = self.feed.next_page();
         Task::perform(
-            net::feed_window(self.token.clone(), category, page as u32),
-            Message::FeedLoaded,
+            net::filter_releases(self.token.clone(), page, category.filter()),
+            move |result| feed_loaded(category, result),
         )
+    }
+
+    fn load_more_feed(&mut self) -> Task<Message> {
+        self.fetch_feed(true)
     }
 
     /// Текущая полка «Обзора». Пустой запрос на поисковой полке — не запрос:
     /// [`Browse::fetch_allowed`] держит `/search/releases` от мусора.
-    fn fetch_browse(&mut self, page: usize) -> Task<Message> {
+    fn fetch_browse(&mut self, more: bool) -> Task<Message> {
         if !self.browse.fetch_allowed() {
-            self.browse.loading = false;
+            self.browse.fail();
             return Task::none();
         }
+        if more {
+            if !self.browse.begin_more() {
+                return Task::none();
+            }
+        } else {
+            self.browse.begin();
+        }
 
-        self.browse.page = page;
-        self.browse.loading = true;
         let token = self.token.clone();
         let tab = self.browse.tab;
+        let page = self.browse.next_page();
 
         match tab {
             BrowseTab::Search => {
                 let query = self.browse.query.trim().to_owned();
-                Task::perform(net::search(token, query, page as u32), search_loaded)
+                Task::perform(net::search(token, query, page), move |result| {
+                    search_loaded(tab, result)
+                })
             }
             BrowseTab::Catalog => {
                 let sort = self.browse.sort;
-                Task::perform(net::filter_releases(token, page as u32, sort), shelf_loaded)
+                let filter = FilterRequest {
+                    sort,
+                    ..Default::default()
+                };
+                Task::perform(
+                    net::filter_releases(token, page, filter),
+                    move |result| shelf_loaded(tab, result),
+                )
             }
             BrowseTab::Interesting | BrowseTab::Comments => {
                 let Some(kind) = tab.discover() else {
                     return Task::none();
                 };
-                Task::perform(net::discover(token, kind), shelf_loaded)
+                Task::perform(net::discover(token, kind), move |result| {
+                    shelf_loaded(tab, result)
+                })
             }
         }
     }
 
+    fn load_more_browse(&mut self) -> Task<Message> {
+        self.fetch_browse(true)
+    }
+
     /// Текущий таб «Закладок». Все восемь разделов требуют токена, поэтому гость
     /// получает подсказку экрана, а не запрос, который сервер заведомо отклонит.
-    fn fetch_bookmarks(&mut self, page: usize) -> Task<Message> {
+    fn fetch_bookmarks(&mut self, more: bool) -> Task<Message> {
         self.bookmarks.signed_in = self.signed_in();
         if !self.bookmarks.fetch_allowed() {
-            self.bookmarks.loading = false;
+            self.bookmarks.fail();
             return Task::none();
         }
+        if more {
+            if !self.bookmarks.begin_more() {
+                return Task::none();
+            }
+        } else {
+            self.bookmarks.begin();
+        }
 
-        self.bookmarks.loading = true;
         let token = self.token.clone();
+        let tab = self.bookmarks.tab;
+        let page = self.bookmarks.next_page();
 
-        if self.bookmarks.tab.is_collections() {
+        if tab.is_collections() {
             Task::perform(
-                net::bookmark_collections(token, page as u32),
-                collections_loaded,
+                net::bookmark_collections(token, page),
+                move |result| collections_loaded(tab, result),
             )
         } else {
-            let tab = self.bookmarks.tab;
-            Task::perform(net::bookmark_releases(token, tab, page as u32), releases_loaded)
+            Task::perform(
+                net::bookmark_releases(token, tab, page),
+                move |result| releases_loaded(tab, result),
+            )
         }
+    }
+
+    fn load_more_bookmarks(&mut self) -> Task<Message> {
+        self.fetch_bookmarks(true)
     }
 
     /// «Профиль»: `/profile/info` плюс документ профиля по его `channel_id`.
@@ -1255,6 +1451,7 @@ impl App {
             Screen::Bookmarks => self.bookmarks.artwork(),
             Screen::Profile => self.profile.artwork(),
             Screen::Release => self.release.artwork(),
+            Screen::Sources => self.release.artwork(),
             Screen::Collection => self.collection_artwork(),
         };
 
@@ -1347,6 +1544,7 @@ impl App {
             Screen::Bookmarks => self.bookmarks.view(cache),
             Screen::Profile => self.profile.view(cache),
             Screen::Release => self.release.view(cache),
+            Screen::Sources => self.release.sources_view(cache),
             Screen::Collection => self.collection_view(cache),
         }
     }
@@ -1550,24 +1748,9 @@ mod tests {
     use super::*;
     use crate::posters::PosterState;
 
-    fn articles(ids: &[i64]) -> Pageable<FeedItem> {
-        Pageable {
-            code: 1,
-            content: ids
-                .iter()
-                .map(|id| FeedItem {
-                    id: *id,
-                    title: Some(format!("Статья {id}")),
-                    image: Some(format!("https://cdn/anixart/{id}.jpg")),
-                    ..Default::default()
-                })
-                .collect(),
-            current_page: 0,
-            total_count: ids.len() as i64,
-            total_page_count: 3,
-        }
-    }
-
+    /// Страница каталога такой, какой её отдаёт живой `POST /filter/{page}`:
+    /// `current_page` и `total_page_count` всегда нулевые, так что полка верит не
+    /// им, а тому, принесла ли страница что-то новое.
     fn releases(ids: &[i64]) -> Pageable<Release> {
         Pageable {
             code: 1,
@@ -1580,10 +1763,27 @@ mod tests {
                     ..Default::default()
                 })
                 .collect(),
-            current_page: 1,
+            current_page: 0,
             total_count: ids.len() as i64,
-            total_page_count: 4,
+            total_page_count: 0,
         }
+    }
+
+    fn dubbed() -> Vec<EpisodeType> {
+        vec![
+            EpisodeType {
+                id: 5,
+                name: "AniLibria".to_owned(),
+                is_sub: false,
+                ..Default::default()
+            },
+            EpisodeType {
+                id: 6,
+                name: "Субтитры | AniLibria".to_owned(),
+                is_sub: true,
+                ..Default::default()
+            },
+        ]
     }
 
     #[test]
@@ -1594,8 +1794,10 @@ mod tests {
         // у входа и вложенных экранов своей пилюли нет
         assert_eq!(Screen::Login.root(), None);
         assert_eq!(Screen::Release.root(), None);
+        assert_eq!(Screen::Sources.root(), None);
         assert_eq!(Screen::Collection.root(), None);
         assert_eq!(Screen::Browse.root(), Some(Screen::Browse));
+        assert_eq!(Screen::Sources.label(), "Источники и серии");
     }
 
     #[test]
@@ -1610,25 +1812,26 @@ mod tests {
         assert!(app.profile.signed_in);
         assert!(app.release.signed_in);
         assert_eq!(app.screen, Screen::Feed);
-        assert!(app.feed.loading, "«Главная» тянется сразу после входа");
+        assert!(app.feed.paging.loading, "«Главная» тянется сразу после входа");
     }
 
     #[test]
-    fn guest_skip_lands_on_the_catalogue_and_fetches_nothing_privileged() {
+    fn guest_skip_lands_on_the_home_shelf_and_fetches_nothing_privileged() {
         let mut app = App::with_store(SessionStore::disabled());
         let _ = app.update(Message::GuestSkip);
 
         assert!(app.token.is_none());
-        assert_eq!(app.screen, Screen::Browse);
-        assert_eq!(app.browse.tab, BrowseTab::Catalog, "полка без запроса");
-        assert!(app.browse.loading);
+        // «Главная» — полка каталога: `/filter` не просит ни токена, ни запроса,
+        // поэтому гость открывается именно ею, а не пустым поиском
+        assert_eq!(app.screen, Screen::Feed);
+        assert!(app.feed.paging.loading);
         assert!(!app.bookmarks.signed_in);
         assert!(!app.profile.signed_in);
         assert!(app.status.is_some());
 
         // Ни один библиотечный запрос не уходит: гость получает подсказку экрана.
         let _ = app.update(Message::Nav(Screen::Bookmarks));
-        assert!(!app.bookmarks.loading);
+        assert!(!app.bookmarks.paging.loading);
         assert!(!app.bookmarks.signed_in);
         assert!(app.bookmarks.is_empty());
 
@@ -1647,16 +1850,157 @@ mod tests {
         let mut app = App::with_store(SessionStore::disabled());
         let _ = app.update(Message::Nav(Screen::Browse));
         assert_eq!(app.browse.tab, BrowseTab::Search);
-        assert!(!app.browse.loading, "пустой запрос не отправляется");
+        assert!(!app.browse.paging.loading, "пустой запрос не отправляется");
 
         let _ = app.update(Message::SearchQuery("  ".to_owned()));
         let _ = app.update(Message::SearchSubmit);
-        assert!(!app.browse.loading);
+        assert!(!app.browse.paging.loading);
 
         let _ = app.update(Message::SearchQuery("наруто".to_owned()));
         let _ = app.update(Message::SearchSubmit);
-        assert!(app.browse.loading);
-        assert_eq!(app.browse.page, 0);
+        assert!(app.browse.paging.loading);
+        assert_eq!(app.browse.paging.pages, 0);
+    }
+
+    #[test]
+    fn scrolling_to_the_bottom_of_a_shelf_asks_for_the_next_page() {
+        let mut app = App::with_store(SessionStore::disabled());
+        let _ = app.update(Message::Nav(Screen::Feed));
+        let _ = app.update(Message::FeedLoaded(
+            FeedCategory::Actual,
+            Ok(releases(&[1, 2])),
+        ));
+        assert_eq!(app.feed.releases.len(), 2);
+        assert_eq!(app.feed.paging.pages, 1);
+
+        // верх полки — не повод
+        let _ = app.update(Message::Scrolled(0.4));
+        assert!(!app.feed.paging.loading_more);
+
+        let _ = app.update(Message::Scrolled(0.95));
+        assert!(app.feed.paging.loading_more, "низ полки запросил вторую страницу");
+        assert_eq!(app.feed.next_page(), 1, "просится именно следующая");
+
+        // второй скролл в том же полёте — не второй запрос
+        let _ = app.update(Message::Scrolled(0.99));
+        assert!(app.feed.paging.loading_more);
+
+        let _ = app.update(Message::FeedLoaded(
+            FeedCategory::Actual,
+            Ok(releases(&[2, 3])),
+        ));
+        assert_eq!(
+            app.feed
+                .releases
+                .iter()
+                .map(|release| release.id)
+                .collect::<Vec<i64>>(),
+            vec![1, 2, 3],
+            "вторая страница дописана, а не подменила первую"
+        );
+        assert!(!app.feed.paging.loading_more);
+        assert_eq!(app.feed.paging.pages, 2);
+    }
+
+    #[test]
+    fn a_shelf_that_brought_nothing_new_is_never_asked_again() {
+        let mut app = App::with_store(SessionStore::disabled());
+        let _ = app.update(Message::Nav(Screen::Feed));
+        let _ = app.update(Message::FeedLoaded(
+            FeedCategory::Actual,
+            Ok(releases(&[1, 2])),
+        ));
+        let _ = app.update(Message::Scrolled(0.9));
+        let _ = app.update(Message::FeedLoaded(
+            FeedCategory::Actual,
+            Ok(releases(&[])),
+        ));
+
+        assert!(app.feed.paging.exhausted);
+        let _ = app.update(Message::Scrolled(1.0));
+        assert!(
+            !app.feed.paging.loading_more,
+            "конец выборки больше ничего не просит"
+        );
+        assert_eq!(app.feed.releases.len(), 2);
+
+        // смена пилюли забывает конец: новая полка начинается с нуля
+        let _ = app.update(Message::FeedCategory(FeedCategory::Donghua));
+        assert!(!app.feed.paging.exhausted);
+        assert!(app.feed.paging.loading);
+        assert!(app.feed.releases.is_empty());
+    }
+
+    #[test]
+    fn a_late_answer_from_another_pill_is_dropped_not_appended() {
+        let mut app = App::with_store(SessionStore::disabled());
+        let _ = app.update(Message::Nav(Screen::Feed));
+        let _ = app.update(Message::FeedCategory(FeedCategory::Movies));
+        assert_eq!(app.feed.category, FeedCategory::Movies);
+
+        // ответ от прежней пилюли, который летел дольше смены
+        let _ = app.update(Message::FeedLoaded(
+            FeedCategory::Actual,
+            Ok(releases(&[1, 2, 3])),
+        ));
+        assert!(
+            app.feed.releases.is_empty(),
+            "чужая полка не дописывается под текущий заголовок"
+        );
+        assert!(
+            app.feed.paging.loading,
+            "отброшенный ответ не снимает флаг настоящей полки"
+        );
+
+        let _ = app.update(Message::FeedLoaded(
+            FeedCategory::Movies,
+            Ok(releases(&[9])),
+        ));
+        assert_eq!(app.feed.releases.len(), 1);
+    }
+
+    #[test]
+    fn scrolling_loads_more_on_every_shelved_screen_and_nowhere_else() {
+        let mut app = App::with_store(SessionStore::disabled());
+        app.token = Some("tok".to_owned());
+
+        // «Обзор»: каталог, который читается без запроса
+        let _ = app.update(Message::Nav(Screen::Browse));
+        assert_eq!(app.browse.tab, BrowseTab::Search);
+        let _ = app.update(Message::BrowseTab(BrowseTab::Catalog));
+        let _ = app.update(Message::SearchLoaded(
+            BrowseTab::Catalog,
+            Ok(BrowsePage::Shelf(releases(&[1, 2]))),
+        ));
+        let _ = app.update(Message::Scrolled(0.9));
+        assert!(app.browse.paging.loading_more, "«Обзор» догружается");
+
+        // «Закладки»: тот же скролл у вошедшего пользователя
+        let _ = app.update(Message::Nav(Screen::Bookmarks));
+        let tab = app.bookmarks.tab;
+        let _ = app.update(Message::BookmarkLoaded(
+            tab,
+            Ok(BookmarkPage::Releases(releases(&[3, 4]))),
+        ));
+        let _ = app.update(Message::Scrolled(0.9));
+        assert!(app.bookmarks.paging.loading_more, "«Закладки» догружаются");
+
+        // страница релиза, коллекция и вход скроллятся без догрузки
+        let _ = app.update(Message::OpenRelease(7));
+        assert_eq!(app.screen, Screen::Release);
+        assert!(app.release.loading);
+        let _ = app.update(Message::Scrolled(1.0));
+        assert_eq!(app.screen, Screen::Release, "ничего не свернулось");
+        assert_eq!(app.release.pending, None);
+
+        let _ = app.update(Message::OpenCollection(4));
+        assert_eq!(app.screen, Screen::Collection);
+        let _ = app.update(Message::Scrolled(1.0));
+        assert!(app.collection_loading, "экран ничего не догружает");
+
+        let _ = app.update(Message::Nav(Screen::Login));
+        let _ = app.update(Message::Scrolled(1.0));
+        assert!(app.error.is_none());
     }
 
     #[test]
@@ -1664,11 +2008,17 @@ mod tests {
         let mut app = App::with_store(SessionStore::disabled());
         // Обложки дозаказываются только для видимого экрана, поэтому сначала «Главная».
         let _ = app.update(Message::Nav(Screen::Feed));
-        let _ = app.update(Message::FeedLoaded(Ok(articles(&[1, 2]))));
+        let _ = app.update(Message::FeedLoaded(
+            FeedCategory::Actual,
+            Ok(releases(&[1, 2])),
+        ));
 
-        assert_eq!(app.feed.items.len(), 2);
+        assert_eq!(app.feed.releases.len(), 2);
         assert_eq!(app.posters.count_state(PosterState::Loading), 2);
-        assert_eq!(app.posters.state(&posters::article_key(1)), PosterState::Loading);
+        assert_eq!(
+            app.posters.state(&posters::release_key(1)),
+            PosterState::Loading
+        );
 
         // Второй проход того же экрана ничего не дозаказывает.
         let _ = app.update(Message::DismissError);
@@ -1680,9 +2030,12 @@ mod tests {
     fn a_broken_poster_settles_on_the_placeholder_without_retrying() {
         let mut app = App::with_store(SessionStore::disabled());
         let _ = app.update(Message::Nav(Screen::Feed));
-        let _ = app.update(Message::FeedLoaded(Ok(articles(&[5]))));
+        let _ = app.update(Message::FeedLoaded(
+            FeedCategory::Actual,
+            Ok(releases(&[5])),
+        ));
 
-        let key = posters::article_key(5);
+        let key = posters::release_key(5);
         let _ = app.update(Message::PosterLoaded(key.clone(), Err("403 forbidden".to_owned())));
         assert_eq!(app.posters.state(&key), PosterState::Failed);
 
@@ -1700,26 +2053,25 @@ mod tests {
     }
 
     #[test]
-    fn article_without_a_picture_is_never_fetched() {
+    fn a_release_without_a_picture_is_never_fetched() {
         let mut app = App::with_store(SessionStore::disabled());
         let _ = app.update(Message::Nav(Screen::Feed));
         let page = Pageable {
             content: vec![
-                FeedItem {
+                Release {
                     id: 1,
                     image: Some(String::new()),
                     ..Default::default()
                 },
-                FeedItem {
+                Release {
                     id: 2,
                     image: None,
                     ..Default::default()
                 },
             ],
-            total_page_count: 1,
             ..Default::default()
         };
-        let _ = app.update(Message::FeedLoaded(Ok(page)));
+        let _ = app.update(Message::FeedLoaded(FeedCategory::Actual, Ok(page)));
 
         assert_eq!(app.posters.count_state(PosterState::Loading), 0);
         assert_eq!(app.posters.count_state(PosterState::Failed), 2);
@@ -1794,29 +2146,122 @@ mod tests {
     }
 
     #[test]
-    fn the_release_back_button_winds_down_before_closing() {
+    fn play_opens_the_variant_row_and_a_voiceover_moves_to_its_own_screen() {
         let mut app = App::with_store(SessionStore::disabled());
         let _ = app.update(Message::Nav(Screen::Browse));
         let _ = app.update(Message::OpenRelease(3));
         assert_eq!(app.screen, Screen::Release);
 
-        app.release.selected_type = Some(0);
-        app.release.selected_source = Some(0);
-        app.release.episodes = vec![Episode {
-            id: 1,
+        let _ = app.update(Message::ReleaseLoaded(Ok(Box::new(Release {
+            id: 3,
+            title_ru: Some("Наруто".to_owned()),
             ..Default::default()
-        }];
+        }))));
+        let _ = app.update(Message::TypesLoaded(Ok(dubbed())));
 
+        // «Воспроизвести» только раскрывает ряд вариантов, экран остаётся релизом
+        let _ = app.update(Message::ReleaseChoose);
+        assert!(app.release.choosing);
+        assert_eq!(app.release.variant, VariantFilter::All);
+        assert_eq!(app.screen, Screen::Release);
+
+        // фильтр списка — тоже ещё не уход со страницы
+        let _ = app.update(Message::SelectVariant(VariantFilter::Subtitle));
+        assert_eq!(app.release.variant, VariantFilter::Subtitle);
+        assert_eq!(app.screen, Screen::Release);
+        assert_eq!(app.release.visible_types().len(), 1);
+
+        // выбранная озвучка уводит на отдельный экран источников и серий
+        let _ = app.update(Message::SelectType(1));
+        assert_eq!(app.screen, Screen::Sources);
+        assert_eq!(app.stack.last(), Some(&Screen::Release));
+        assert_eq!(app.release.type_id(), Some(6));
+        assert!(app.release.loading_sources);
+
+        let _ = app.update(Message::SourcesLoaded(Ok(vec![Source {
+            id: 77,
+            name: "Kodik".to_owned(),
+            ..Default::default()
+        }])));
+        let _ = app.update(Message::SelectSource(0));
+        assert!(app.release.loading_episodes);
+        assert_eq!(app.screen, Screen::Sources, "источник — та же ступень");
+
+        let _ = app.update(Message::EpisodesLoaded(Ok(vec![Episode {
+            id: 1,
+            position: 1,
+            url: "https://kodik.example/1".to_owned(),
+            ..Default::default()
+        }])));
+
+        // «← Назад к озвучкам»: серии сворачиваются, экран остаётся
         let _ = app.update(Message::ReleaseBack);
-        assert_eq!(app.screen, Screen::Release, "сначала серии");
+        assert_eq!(app.screen, Screen::Sources);
         assert!(app.release.episodes.is_empty());
+        assert_eq!(app.release.type_id(), Some(6));
 
+        // второе нажатие возвращает к озвучкам на страницу релиза
         let _ = app.update(Message::ReleaseBack);
-        assert_eq!(app.screen, Screen::Release, "потом озвучка");
+        assert_eq!(app.screen, Screen::Release);
         assert_eq!(app.release.selected_type, None);
+        assert!(app.release.sources.is_empty());
 
+        // третье закрывает страницу релиза
         let _ = app.update(Message::ReleaseBack);
-        assert_eq!(app.screen, Screen::Browse, "затем страница закрывается");
+        assert_eq!(app.screen, Screen::Browse);
+    }
+
+    #[test]
+    fn choosing_a_variant_pulls_the_voiceovers_if_they_are_not_there_yet() {
+        let mut app = App::with_store(SessionStore::disabled());
+        let _ = app.update(Message::OpenRelease(11));
+        let _ = app.update(Message::ReleaseLoaded(Ok(Box::new(Release {
+            id: 11,
+            ..Default::default()
+        }))));
+        // ответ о озвучках ещё не пришёл, но `loading_types` уже поднят
+        assert!(app.release.loading_types);
+        let _ = app.update(Message::ReleaseChoose);
+        assert!(app.release.choosing);
+        assert!(app.release.loading_types, "второй запрос озвучек не строится");
+
+        let _ = app.update(Message::TypesLoaded(Err("хост недоступен".to_owned())));
+        assert!(!app.release.loading_types);
+        assert!(app.error.as_deref().unwrap().contains("хост"));
+
+        // теперь список пуст и загрузка не идёт: «Воспроизвести» тянет его заново
+        let _ = app.update(Message::ReleaseChoose);
+        assert!(app.release.loading_types);
+    }
+
+    #[test]
+    fn the_mpv_caption_pairs_the_release_with_its_series() {
+        let mut app = App::with_store(SessionStore::disabled());
+        let _ = app.update(Message::OpenRelease(3));
+        let _ = app.update(Message::ReleaseLoaded(Ok(Box::new(Release {
+            id: 3,
+            title_ru: Some("Наруто".to_owned()),
+            ..Default::default()
+        }))));
+        app.release.episodes = vec![
+            Episode {
+                position: 12,
+                name: Some("Битва за Коноху".to_owned()),
+                ..Default::default()
+            },
+            Episode::default(),
+        ];
+
+        assert_eq!(
+            app.playback_caption(Some(0)),
+            "Наруто — №12 · Битва за Коноху"
+        );
+        assert_eq!(app.playback_caption(Some(1)), "Наруто — №2");
+        assert_eq!(app.playback_caption(None), "Серия");
+
+        // релиз, который ещё не пришёл, зовётся только серией: тире без имени лжёт
+        app.release.release = None;
+        assert_eq!(app.playback_caption(Some(0)), "№12 · Битва за Коноху");
     }
 
     #[test]
@@ -1827,6 +2272,7 @@ mod tests {
         let _ = app.update(Message::BookmarkTab(BookmarkTab::Favorites));
         assert_eq!(app.bookmarks.tab, BookmarkTab::Favorites);
 
+        // ответ чужого таба — и по содержанию, и по запросу
         let page = BookmarkPage::Collections(Pageable {
             code: 1,
             content: vec![Collection {
@@ -1838,15 +2284,32 @@ mod tests {
             total_count: 1,
             total_page_count: 1,
         });
-        let _ = app.update(Message::BookmarkLoaded(Ok(page)));
+        let _ = app.update(Message::BookmarkLoaded(BookmarkTab::Collections, Ok(page)));
         assert!(app.bookmarks.collections.is_empty());
-        assert!(!app.bookmarks.loading);
 
-        let _ = app.update(Message::BookmarkLoaded(Ok(BookmarkPage::Releases(
-            releases(&[1, 2, 3]),
-        ))));
+        let _ = app.update(Message::BookmarkLoaded(
+            BookmarkTab::Favorites,
+            Ok(BookmarkPage::Collections(Pageable {
+                content: vec![Collection {
+                    id: 5,
+                    title: "Коллекция".to_owned(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            })),
+        ));
+        assert!(
+            app.bookmarks.collections.is_empty(),
+            "релизовый таб не принимает коллекции"
+        );
+        assert!(!app.bookmarks.paging.loading_more);
+
+        let _ = app.update(Message::BookmarkLoaded(
+            BookmarkTab::Favorites,
+            Ok(BookmarkPage::Releases(releases(&[1, 2, 3]))),
+        ));
         assert_eq!(app.bookmarks.releases.len(), 3);
-        assert_eq!(app.bookmarks.page, 1);
+        assert_eq!(app.bookmarks.paging.pages, 1);
         assert_eq!(app.posters.count_state(PosterState::Loading), 3);
     }
 
@@ -1936,12 +2399,27 @@ mod tests {
         assert!(app.error.is_none());
 
         let _ = app.update(Message::GuestSkip);
-        let _ = app.update(Message::FeedLoaded(Ok(articles(&[1, 2]))));
+        let _ = app.update(Message::FeedLoaded(
+            FeedCategory::Actual,
+            Ok(releases(&[1, 2])),
+        ));
         let _ = app.update(Message::Nav(Screen::Feed));
         let _ = app.view();
 
         let _ = app.update(Message::Nav(Screen::Profile));
         let _ = app.update(Message::Nav(Screen::Bookmarks));
+        let _ = app.view();
+
+        // экран источников и серий рисуется тем же состоянием релиза
+        let _ = app.update(Message::OpenRelease(3));
+        let _ = app.update(Message::ReleaseLoaded(Ok(Box::new(Release {
+            id: 3,
+            title_ru: Some("Наруто".to_owned()),
+            ..Default::default()
+        }))));
+        let _ = app.update(Message::TypesLoaded(Ok(dubbed())));
+        let _ = app.update(Message::SelectType(0));
+        assert_eq!(app.screen, Screen::Sources);
         let _ = app.view();
     }
 
@@ -1949,14 +2427,17 @@ mod tests {
     fn logging_out_wipes_the_session_and_the_posters() {
         let mut app = App::with_store(SessionStore::disabled());
         let _ = app.update(Message::LoggedIn(Ok("tok".to_owned())));
-        let _ = app.update(Message::FeedLoaded(Ok(articles(&[1]))));
+        let _ = app.update(Message::FeedLoaded(
+            FeedCategory::Actual,
+            Ok(releases(&[1])),
+        ));
         assert!(!app.posters.is_empty());
 
         let _ = app.update(Message::Logout);
         assert!(app.token.is_none());
         assert_eq!(app.screen, Screen::Login);
         assert!(app.posters.is_empty(), "чужие обложки не переходят по аккаунтам");
-        assert!(app.feed.items.is_empty());
+        assert!(app.feed.releases.is_empty());
         assert!(!app.bookmarks.signed_in);
     }
 }

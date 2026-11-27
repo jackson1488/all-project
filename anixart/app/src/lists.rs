@@ -1,19 +1,26 @@
-//! The vocabulary of the user's release lists.
+//! The vocabulary of the user's release lists and of the shelves that show them.
 //!
-//! Two things live here: [`WatchStatus`], the six positions a release can hold in
+//! Four things live here: [`WatchStatus`], the six positions a release can hold in
 //! a profile list (`Release.profile_list_status` — the same numbering the official
-//! client uses), and [`BookmarkTab`], the eight sections the «Закладки» screen is
-//! built from. Both are plain data: the endpoints they map onto are chosen in
-//! [`crate::net`], the rows that render them in [`crate::bookmarks`].
+//! client uses), [`BookmarkTab`], the eight sections the «Закладки» screen is
+//! built from, and [`FeedCategory`], the seven home shelves, which are nothing but
+//! a [`FilterRequest`] each. All of them are plain data: the endpoints they map
+//! onto are chosen in [`crate::net`], the rows that render them in
+//! [`crate::bookmarks`] / [`crate::feed`].
 //!
 //! The status codes come from `ProfileListApi` in the shipping client:
 //! `profile/list/all/{status}/{page}` and `profile/list/add/{status}/{r_id}` take
 //! the integer of [`WatchStatus::code`], and status 0 is the absence of a list
 //! entry, which is why [`WatchStatus::None`] deletes rather than adds.
+//!
+//! [`Paging`] and [`append_unique`] are the infinite-scroll bookkeeping the three
+//! shelved screens share: `POST /filter/{page}` always echoes `total_page_count =
+//! 0`, so the only honest end of a shelf is the page that brought nothing new.
 
+use std::collections::HashSet;
 use std::fmt;
 
-use anixart_core::WatchStatus as CoreStatus;
+use anixart_core::{EpisodeType, FilterRequest, WatchStatus as CoreStatus};
 
 /// Where a release sits in the signed-in profile's lists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -229,48 +236,56 @@ impl fmt::Display for BookmarkTab {
     }
 }
 
-/// Catalogue status of a release (`Release::status_id`), the way the Anixart API
-/// numbers it. Unknown values render nothing at all instead of a wrong word, so a
-/// future status never lies to the user.
+/// Catalogue status of a release, numbered the way the live Anixart API numbers it.
+///
+/// A catalogue card carries the status twice: a bare `status_id`, which the filter
+/// endpoint leaves at `0`, and a `status: { id, name }` object whose `id` is the
+/// value below. [`crate::release`] therefore prefers the name the backend sent and
+/// falls back to this table. Unknown values render nothing at all instead of a
+/// wrong word, so a status this client does not know never lies to the user.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReleaseStatus {
-    /// 1 — announced, not streaming yet.
-    Announced,
-    /// 2 — on hiatus before it started.
-    Stopped,
-    /// 3 — finished.
-    Finished,
-    /// 4 — currently airing.
-    Ongoing,
-    /// 5 — paused.
-    Paused,
-    /// 6 — released (a film or OVA that came out).
+    /// 1 — «Вышел»: airing finished.
     Released,
+    /// 2 — «Выходит»: онгоинг.
+    Ongoing,
+    /// 3 — «Анонс»: announced, nothing streamed yet.
+    Announced,
 }
 
 impl ReleaseStatus {
+    /// Every status the API has, in id order.
+    pub const ALL: [ReleaseStatus; 3] = [
+        ReleaseStatus::Released,
+        ReleaseStatus::Ongoing,
+        ReleaseStatus::Announced,
+    ];
+
     /// Russian caption shown on the release card.
     pub fn label(self) -> &'static str {
         match self {
-            ReleaseStatus::Announced => "Анонсируется",
-            ReleaseStatus::Stopped => "Не выходит",
-            ReleaseStatus::Finished => "Завершён",
-            ReleaseStatus::Ongoing => "В процессе",
-            ReleaseStatus::Paused => "Приостановлен",
             ReleaseStatus::Released => "Вышел",
+            ReleaseStatus::Ongoing => "Выходит",
+            ReleaseStatus::Announced => "Анонс",
         }
     }
 
-    /// Reads it out of `Release::status_id`; `None` for a value this client does
+    /// The `status_id` the filter endpoint is asked with.
+    pub fn id(self) -> i64 {
+        match self {
+            ReleaseStatus::Released => 1,
+            ReleaseStatus::Ongoing => 2,
+            ReleaseStatus::Announced => 3,
+        }
+    }
+
+    /// Reads it out of a numeric status; `None` for a value this client does
     /// not know.
     pub fn from_id(id: i64) -> Option<Self> {
         match id {
-            1 => Some(ReleaseStatus::Announced),
-            2 => Some(ReleaseStatus::Stopped),
-            3 => Some(ReleaseStatus::Finished),
-            4 => Some(ReleaseStatus::Ongoing),
-            5 => Some(ReleaseStatus::Paused),
-            6 => Some(ReleaseStatus::Released),
+            1 => Some(ReleaseStatus::Released),
+            2 => Some(ReleaseStatus::Ongoing),
+            3 => Some(ReleaseStatus::Announced),
             _ => None,
         }
     }
@@ -281,62 +296,104 @@ impl ReleaseStatus {
     }
 }
 
-/// The category pills of the «Главная» screen.
+impl fmt::Display for ReleaseStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
+/// The seven shelves of the «Главная» screen, in pill order — the same tabs the
+/// official client puts on its home.
 ///
-/// The Anixart feed has two endpoints: `feed/latest/all/{page}` (what the app
-/// shows by default) and `feed/all/{page}?date=N`, where `N` is the window the
-/// official client numbers as `date_day` … `date_whole_time`. [`FeedCategory::Latest`]
-/// therefore carries no `date` at all — it selects the other endpoint.
+/// Every shelf is one `POST /filter/{page}` request, so a category is nothing but
+/// the [`FilterRequest`] it stands for: a country for «Аниме» and «Дунхуа», a
+/// catalogue category for «Фильмы», a release status for «Онгоинги», «Анонсы» and
+/// «Завершённые», and a bare sort for «Последнее». The ids are the ones the live
+/// API answers with — `category_id` 2 is «Фильм», `status_id` 1 «Вышел», 2
+/// «Выходит», 3 «Анонс» — and the body goes out in the snake_case those names
+/// have there.
+///
+/// None of that needs a session token, so all seven shelves open for a guest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FeedCategory {
-    /// `GET /feed/latest/all/{page}` — the newest articles of every channel.
+    /// Свежие обновления каталога — `sort = 0` без прочих ограничений.
     #[default]
-    Latest,
-    /// `date = 1` — за сутки.
-    Day,
-    /// `date = 2` — за неделю.
-    Week,
-    /// `date = 3` — за месяц.
-    Month,
-    /// `date = 4` — за год.
-    Year,
-    /// `date = 5` — за всё время.
-    WholeTime,
+    Actual,
+    /// Онгоинги — `status_id = 2`.
+    Ongoing,
+    /// Анонсы — `status_id = 3`.
+    Announced,
+    /// Завершённые — `status_id = 1`.
+    Finished,
+    /// Фильмы — `category_id = 2`.
+    Movies,
+    /// Аниме — `country = "Япония"`.
+    Anime,
+    /// Дунхуа — `country = "Китай"`.
+    Donghua,
 }
 
 impl FeedCategory {
     /// Every pill, in the order the home screen shows them.
-    pub const ALL: [FeedCategory; 6] = [
-        FeedCategory::Latest,
-        FeedCategory::Day,
-        FeedCategory::Week,
-        FeedCategory::Month,
-        FeedCategory::Year,
-        FeedCategory::WholeTime,
+    pub const ALL: [FeedCategory; 7] = [
+        FeedCategory::Actual,
+        FeedCategory::Ongoing,
+        FeedCategory::Announced,
+        FeedCategory::Finished,
+        FeedCategory::Movies,
+        FeedCategory::Anime,
+        FeedCategory::Donghua,
     ];
 
     /// Russian caption of the pill.
     pub fn label(self) -> &'static str {
         match self {
-            FeedCategory::Latest => "Последние",
-            FeedCategory::Day => "За сутки",
-            FeedCategory::Week => "За неделю",
-            FeedCategory::Month => "За месяц",
-            FeedCategory::Year => "За год",
-            FeedCategory::WholeTime => "За всё время",
+            FeedCategory::Actual => "Последнее",
+            FeedCategory::Ongoing => "Онгоинги",
+            FeedCategory::Announced => "Анонсы",
+            FeedCategory::Finished => "Завершённые",
+            FeedCategory::Movies => "Фильмы",
+            FeedCategory::Anime => "Аниме",
+            FeedCategory::Donghua => "Дунхуа",
         }
     }
 
-    /// The `date` query parameter, `None` for the latest-articles endpoint, which
-    /// takes no filter at all.
-    pub fn date(self) -> Option<i32> {
+    /// Каталог-ограничение (`category.id`), `None` для полок, которые его не сужают.
+    pub fn category_id(self) -> Option<i64> {
         match self {
-            FeedCategory::Latest => None,
-            FeedCategory::Day => Some(1),
-            FeedCategory::Week => Some(2),
-            FeedCategory::Month => Some(3),
-            FeedCategory::Year => Some(4),
-            FeedCategory::WholeTime => Some(5),
+            FeedCategory::Movies => Some(2),
+            _ => None,
+        }
+    }
+
+    /// Статус релиза (`status.id`), `None` для полок, которые не смотрят на статус.
+    pub fn status_id(self) -> Option<i64> {
+        match self {
+            FeedCategory::Finished => Some(ReleaseStatus::Released.id()),
+            FeedCategory::Ongoing => Some(ReleaseStatus::Ongoing.id()),
+            FeedCategory::Announced => Some(ReleaseStatus::Announced.id()),
+            _ => None,
+        }
+    }
+
+    /// Страна производства, `None` для полок без странного фильтра.
+    pub fn country(self) -> Option<&'static str> {
+        match self {
+            FeedCategory::Anime => Some("Япония"),
+            FeedCategory::Donghua => Some("Китай"),
+            _ => None,
+        }
+    }
+
+    /// Тело запроса `POST /filter/{page}`: полка — это именно оно, ничего больше
+    /// на «Главной» не выбирается.
+    pub fn filter(self) -> FilterRequest {
+        FilterRequest {
+            sort: 0,
+            category_id: self.category_id(),
+            status_id: self.status_id(),
+            country: self.country().map(str::to_owned),
+            ..Default::default()
         }
     }
 
@@ -350,6 +407,65 @@ impl FeedCategory {
 }
 
 impl fmt::Display for FeedCategory {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
+/// Ряд «Выберите вариант» на странице релиза: какие из озвучек и переводов показать.
+///
+/// Официальный клиент делит список вариантов именно так — «Все», только закадровая
+/// озвучка, только субтитры, — и деление это берётся из `EpisodeType::is_sub`,
+/// который backend присылает вместе с каждым вариантом.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum VariantFilter {
+    /// Все варианты подряд.
+    #[default]
+    All,
+    /// Только озвучки (`is_sub == false`).
+    Voiceover,
+    /// Только субтитры (`is_sub == true`).
+    Subtitle,
+}
+
+impl VariantFilter {
+    /// Every option, in the order the row shows them.
+    pub const ALL: [VariantFilter; 3] = [
+        VariantFilter::All,
+        VariantFilter::Voiceover,
+        VariantFilter::Subtitle,
+    ];
+
+    /// Russian caption of the pill.
+    pub fn label(self) -> &'static str {
+        match self {
+            VariantFilter::All => "Все",
+            VariantFilter::Voiceover => "Озвучки",
+            VariantFilter::Subtitle => "Субтитры",
+        }
+    }
+
+    /// Does this variant belong to the shelf? The index a [`Message::SelectType`]
+    /// carries is always the position in the *unfiltered* list, so filtering never
+    /// renumbers the rows ([`crate::release`]).
+    pub fn accepts(self, kind: &EpisodeType) -> bool {
+        match self {
+            VariantFilter::All => true,
+            VariantFilter::Voiceover => !kind.is_sub,
+            VariantFilter::Subtitle => kind.is_sub,
+        }
+    }
+
+    pub fn index(self) -> usize {
+        Self::ALL.iter().position(|variant| *variant == self).unwrap_or(0)
+    }
+
+    pub fn from_index(index: usize) -> Self {
+        Self::ALL.get(index).copied().unwrap_or_default()
+    }
+}
+
+impl fmt::Display for VariantFilter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.label())
     }
@@ -436,7 +552,7 @@ impl BrowseTab {
     }
 
     /// `true` for the tabs the backend pages through; the discovery shelves answer
-    /// with one fixed list, so their pager would only ever show «Стр. 1 из 1».
+    /// with one fixed list, so their infinite scroll stops after the first page.
     pub fn is_paged(self) -> bool {
         matches!(self, BrowseTab::Search | BrowseTab::Catalog)
     }
@@ -490,9 +606,99 @@ pub fn catalog_sort_label(sort: i32) -> &'static str {
         .unwrap_or("Сортировка")
 }
 
+/// Сколько ответов уже легло в полку и куда ещё есть идти.
+///
+/// Полка, накопленная скроллом, отличается от полки, перелистываемой кнопками,
+/// двумя вещами: список не заменяется, а дописывается, и конец выборки никто не
+/// сообщает. `POST /filter/{page}` отвечает `total_page_count = 0` и
+/// `current_page = 0` всегда, поэтому единственный честный признак конца —
+/// страница, которая не принесла ни одного нового элемента.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Paging {
+    /// Сколько ответов легло в полку: ноль до первого, страница `pages` — следующая.
+    pub pages: usize,
+    /// Первый ответ полки в полёте.
+    pub loading: bool,
+    /// Догрузка следующей страницы в полёте.
+    pub loading_more: bool,
+    /// Дальше идти некуда: ответ не принёс ничего нового.
+    pub exhausted: bool,
+}
+
+impl Paging {
+    /// Номер страницы, который надо просить следующим.
+    pub fn next(self) -> u32 {
+        self.pages as u32
+    }
+
+    /// Можно ли догружать: не в полёте, не конец, и хотя бы один ответ уже был.
+    pub fn can_load_more(self) -> bool {
+        !self.loading && !self.loading_more && !self.exhausted && self.pages > 0
+    }
+
+    /// Полка начинается заново: ни страниц, ни признака конца.
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    /// Ушёл первый запрос полки.
+    pub fn begin(&mut self) {
+        self.reset();
+        self.loading = true;
+    }
+
+    /// Ушёл запрос следующей страницы.
+    pub fn begin_more(&mut self) -> bool {
+        if !self.can_load_more() {
+            return false;
+        }
+        self.loading_more = true;
+        true
+    }
+
+    /// Ответ принят: `added` — сколько элементов реально добавилось. Ноль значит,
+    /// что полка дошла до конца выборки.
+    pub fn finish(&mut self, added: usize) {
+        self.loading = false;
+        self.loading_more = false;
+        self.pages += 1;
+        if added == 0 {
+            self.exhausted = true;
+        }
+    }
+
+    /// Отказ сервера: запрос снят, страница не засчитана, конец не объявлен —
+    /// догрузку можно повторить.
+    pub fn fail(&mut self) {
+        self.loading = false;
+        self.loading_more = false;
+    }
+}
+
+/// Прибавляет к накопленному списку только те элементы, которых в нём ещё нет.
+///
+/// Возвращает число реально добавленных — по нему [`Paging::finish`] понимает, что
+/// страницы кончились. Порядок сохраняем: приходившие раньше элементы остаются
+/// на своих местах, потому что полка «Последнее» уже отсортирована сервером.
+pub fn append_unique<T, F>(held: &mut Vec<T>, incoming: Vec<T>, id: F) -> usize
+where
+    F: Fn(&T) -> i64,
+{
+    let mut seen: HashSet<i64> = held.iter().map(&id).collect();
+    let mut added = 0;
+    for item in incoming {
+        if seen.insert(id(&item)) {
+            held.push(item);
+            added += 1;
+        }
+    }
+    added
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anixart_core::Release;
 
     #[test]
     fn watch_statuses_round_trip_through_their_api_codes() {
@@ -635,46 +841,251 @@ mod tests {
 
     #[test]
     fn known_release_statuses_get_a_label_and_unknown_ones_get_nothing() {
-        for id in 1..=6 {
-            let label = ReleaseStatus::label_of_id(id).expect("a known status");
+        for status in ReleaseStatus::ALL {
+            let label = ReleaseStatus::label_of_id(status.id()).expect("a known status");
+            assert_eq!(label, status.label());
             assert!(!label.is_empty());
+            assert_eq!(ReleaseStatus::from_id(status.id()), Some(status));
         }
+        // the numbering the live catalogue sends: 1 вышел, 2 выходит, 3 анонс
+        assert_eq!(ReleaseStatus::label_of_id(1), Some("Вышел"));
+        assert_eq!(ReleaseStatus::label_of_id(2), Some("Выходит"));
+        assert_eq!(ReleaseStatus::label_of_id(3), Some("Анонс"));
+        // `status_id = 0` is what the filter endpoint leaves in the card: no word
         assert_eq!(ReleaseStatus::label_of_id(0), None);
-        assert_eq!(ReleaseStatus::label_of_id(7), None);
-        assert_eq!(ReleaseStatus::label_of_id(-1), None);
-        assert_eq!(ReleaseStatus::from_id(4), Some(ReleaseStatus::Ongoing));
-        assert_eq!(ReleaseStatus::Ongoing.label(), "В процессе");
-        assert_eq!(ReleaseStatus::Finished.label(), "Завершён");
+        for id in [4, 5, 6, 7, 42, -1, i64::MAX] {
+            assert_eq!(ReleaseStatus::label_of_id(id), None, "{id}");
+        }
+        assert_eq!(ReleaseStatus::Ongoing.to_string(), "Выходит");
     }
 
     #[test]
-    fn feed_pills_number_the_date_window_like_the_official_client() {
-        // «Последние» is the other endpoint, so it carries no date at all
-        assert_eq!(FeedCategory::Latest.date(), None);
-        assert_eq!(FeedCategory::Day.date(), Some(1));
-        assert_eq!(FeedCategory::Week.date(), Some(2));
-        assert_eq!(FeedCategory::Month.date(), Some(3));
-        assert_eq!(FeedCategory::Year.date(), Some(4));
-        assert_eq!(FeedCategory::WholeTime.date(), Some(5));
-        assert_eq!(FeedCategory::default(), FeedCategory::Latest);
-
+    fn feed_pills_are_the_seven_home_shelves_of_the_official_client() {
         let labels: Vec<&str> = FeedCategory::ALL.iter().map(|c| c.label()).collect();
         assert_eq!(
             labels,
-            ["Последние", "За сутки", "За неделю", "За месяц", "За год", "За всё время"]
+            [
+                "Последнее",
+                "Онгоинги",
+                "Анонсы",
+                "Завершённые",
+                "Фильмы",
+                "Аниме",
+                "Дунхуа"
+            ]
         );
-        assert_eq!(FeedCategory::ALL.len(), 6);
+        assert_eq!(FeedCategory::ALL.len(), 7);
+        assert_eq!(FeedCategory::default(), FeedCategory::Actual);
         for (index, category) in FeedCategory::ALL.iter().enumerate() {
             assert_eq!(category.index(), index);
             assert_eq!(FeedCategory::from_index(index), *category);
         }
-        assert_eq!(FeedCategory::from_index(99), FeedCategory::Latest);
-        assert_eq!(FeedCategory::Month.to_string(), "За месяц");
-        // only the latest-articles endpoint is unfiltered
+        assert_eq!(FeedCategory::from_index(99), FeedCategory::Actual);
+        assert_eq!(FeedCategory::Donghua.to_string(), "Дунхуа");
+    }
+
+    #[test]
+    fn every_feed_pill_is_one_filter_request() {
+        // «Последнее» ничего не сужает, кроме порядка: свежие обновления сверху
+        let actual = FeedCategory::Actual.filter();
+        assert_eq!(actual.sort, 0);
+        assert_eq!(actual.category_id, None);
+        assert_eq!(actual.status_id, None);
+        assert_eq!(actual.country, None);
+
+        // статусные полки берут `status_id` из того же справочника, что и чипы
         assert_eq!(
-            FeedCategory::ALL.iter().filter(|c| c.date().is_none()).count(),
-            1
+            FeedCategory::Ongoing.filter().status_id,
+            Some(ReleaseStatus::Ongoing.id())
         );
+        assert_eq!(
+            FeedCategory::Announced.filter().status_id,
+            Some(ReleaseStatus::Announced.id())
+        );
+        assert_eq!(
+            FeedCategory::Finished.filter().status_id,
+            Some(ReleaseStatus::Released.id())
+        );
+        for category in [
+            FeedCategory::Actual,
+            FeedCategory::Movies,
+            FeedCategory::Anime,
+            FeedCategory::Donghua,
+        ] {
+            assert_eq!(category.filter().status_id, None, "{category}");
+        }
+
+        // «Фильмы» — каталожная категория 2, страны у неё нет
+        let movies = FeedCategory::Movies.filter();
+        assert_eq!(movies.category_id, Some(2));
+        assert_eq!(movies.country, None);
+        for category in [
+            FeedCategory::Actual,
+            FeedCategory::Ongoing,
+            FeedCategory::Announced,
+            FeedCategory::Finished,
+        ] {
+            assert_eq!(category.filter().category_id, None, "{category}");
+        }
+
+        // страновые полки — единственный фильтр, который говорит по-русски
+        assert_eq!(FeedCategory::Anime.filter().country.as_deref(), Some("Япония"));
+        assert_eq!(FeedCategory::Donghua.filter().country.as_deref(), Some("Китай"));
+        for category in [
+            FeedCategory::Actual,
+            FeedCategory::Ongoing,
+            FeedCategory::Announced,
+            FeedCategory::Finished,
+            FeedCategory::Movies,
+        ] {
+            assert_eq!(category.filter().country, None, "{category}");
+        }
+
+        // ни одна полка не трогает то, чего «Главная» не выбирает
+        for category in FeedCategory::ALL {
+            let filter = category.filter();
+            assert_eq!(filter.genres, Vec::<String>::new());
+            assert_eq!(filter.types, Vec::<i64>::new());
+            assert_eq!(filter.start_year, None);
+            assert_eq!(filter.end_year, None);
+            assert_eq!(filter.episodes_from, None);
+            assert_eq!(filter.episodes_to, None);
+            assert!(!filter.is_genres_exclude_mode_enabled);
+        }
+    }
+
+    #[test]
+    fn the_variant_row_splits_voiceovers_from_subtitles() {
+        let dub = EpisodeType {
+            name: "AniDUB".to_owned(),
+            is_sub: false,
+            ..Default::default()
+        };
+        let sub = EpisodeType {
+            name: "Субтитры | Netflix".to_owned(),
+            is_sub: true,
+            ..Default::default()
+        };
+
+        assert!(VariantFilter::All.accepts(&dub));
+        assert!(VariantFilter::All.accepts(&sub));
+        assert!(VariantFilter::Voiceover.accepts(&dub));
+        assert!(!VariantFilter::Voiceover.accepts(&sub));
+        assert!(VariantFilter::Subtitle.accepts(&sub));
+        assert!(!VariantFilter::Subtitle.accepts(&dub));
+
+        let labels: Vec<&str> = VariantFilter::ALL.iter().map(|v| v.label()).collect();
+        assert_eq!(labels, ["Все", "Озвучки", "Субтитры"]);
+        assert_eq!(VariantFilter::default(), VariantFilter::All);
+        for (index, variant) in VariantFilter::ALL.iter().enumerate() {
+            assert_eq!(variant.index(), index);
+            assert_eq!(VariantFilter::from_index(index), *variant);
+        }
+        assert_eq!(VariantFilter::from_index(7), VariantFilter::All);
+        assert_eq!(VariantFilter::Subtitle.to_string(), "Субтитры");
+    }
+
+    #[test]
+    fn a_shelf_only_ends_on_a_page_that_added_nothing_new() {
+        let mut paging = Paging::default();
+        assert_eq!(paging.next(), 0, "первая страница — нулевая");
+        assert!(!paging.can_load_more(), "до первого ответа догружать нечего");
+
+        paging.begin();
+        assert!(paging.loading);
+        assert!(!paging.can_load_more(), "первый ответ ещё в полёте");
+
+        paging.finish(25);
+        assert_eq!((paging.pages, paging.next()), (1, 1));
+        assert!(!paging.loading);
+        assert!(!paging.exhausted);
+        assert!(paging.can_load_more());
+
+        // догрузка: вторая страница, тоже полная
+        assert!(paging.begin_more());
+        assert!(paging.loading_more);
+        assert!(!paging.can_load_more(), "вторая догрузка в полёте не начинается");
+        paging.finish(25);
+        assert_eq!(paging.next(), 2);
+
+        // страница, которая ничего нового не принесла, и есть конец выборки
+        paging.begin_more();
+        paging.finish(0);
+        assert!(paging.exhausted);
+        assert!(!paging.can_load_more());
+        assert_eq!(paging.next(), 3, "пройденные страницы не откатываются");
+
+        // отказ сервера страницу не засчитывает: её можно попросить снова
+        let mut retry = Paging {
+            pages: 2,
+            ..Default::default()
+        };
+        assert!(retry.begin_more());
+        retry.fail();
+        assert_eq!(retry.next(), 2);
+        assert!(!retry.loading_more);
+        assert!(retry.can_load_more());
+        assert!(!retry.exhausted);
+
+        // смена полки забывает всё: ни страниц, ни конца
+        let mut fresh = Paging::default();
+        fresh.begin();
+        fresh.finish(0);
+        assert!(fresh.exhausted);
+        fresh.reset();
+        assert_eq!(fresh, Paging::default());
+        assert!(!fresh.exhausted);
+
+        // `begin` сам сбрасывает прошлый конец: полка начинается заново
+        let mut again = Paging {
+            pages: 4,
+            exhausted: true,
+            ..Default::default()
+        };
+        again.begin();
+        assert_eq!(again.pages, 0);
+        assert!(!again.exhausted);
+        assert!(again.loading);
+    }
+
+    #[test]
+    fn appending_a_page_keeps_the_order_and_drops_the_repeats() {
+        let mut held: Vec<Release> = vec![
+            Release { id: 1, ..Default::default() },
+            Release { id: 2, ..Default::default() },
+        ];
+        let incoming = vec![
+            Release { id: 2, ..Default::default() },
+            Release { id: 3, ..Default::default() },
+            Release { id: 3, ..Default::default() },
+        ];
+        let added = append_unique(&mut held, incoming, |release| release.id);
+        assert_eq!(added, 1, "повторы не считаются");
+        assert_eq!(
+            held.iter().map(|release| release.id).collect::<Vec<i64>>(),
+            vec![1, 2, 3]
+        );
+
+        // пустая страница — ноль добавленных, список не тронут
+        let added = append_unique(&mut held, Vec::new(), |release: &Release| release.id);
+        assert_eq!(added, 0);
+        assert_eq!(held.len(), 3);
+
+        // полка с нуля принимает всё подряд
+        let mut empty: Vec<Release> = Vec::new();
+        let added = append_unique(
+            &mut empty,
+            vec![Release { id: 7, ..Default::default() }],
+            |release| release.id,
+        );
+        assert_eq!((added, empty.len()), (1, 1));
+
+        // ключ берётся не только у релизов: коллекции живут в том же скролле
+        let mut titles = vec!["a".to_owned()];
+        let added = append_unique(&mut titles, vec!["a".to_owned(), "b".to_owned()], |title| {
+            title.len() as i64
+        });
+        assert_eq!(added, 0, "«b» той же длины, что «a»");
     }
 
     #[test]

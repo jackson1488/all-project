@@ -6,9 +6,14 @@
 //! once, in this module, instead of being repeated at every call site.
 //!
 //! The visual values come from [`crate::theme`]; the small text-shaping helpers
-//! ([`grade_label`], [`quality_label`], [`join_meta`], [`page_summary`]) are pure
+//! ([`grade_label`], [`quality_label`], [`join_meta`], [`release_title`]) are pure
 //! and unit-tested, because a Russian interface lives or dies on its plurals and
 //! on whether «7,8» is printed with a comma.
+//!
+//! Three shelves — «Главная», «Обзор», «Закладки» — are endless lists of posters,
+//! and none of them has page buttons: [`scroll_infinite`] watches the viewport and
+//! fires the load-more message when the user reaches [`SCROLL_TRIGGER`], the same
+//! «догружаем у конца» that the official client does with its `NestedScrollView`.
 //!
 //! Two iced 0.13 constraints shape the code:
 //!
@@ -20,9 +25,9 @@
 //!   fill would stay grey. The button labels therefore leave the colour to the
 //!   style function; the plain texts of a card set theirs explicitly.
 
-use anixart_core::{Collection, EpisodeType, FeedItem, Release};
-use iced::widget::{button, container, horizontal_space, scrollable, text, Column, Row, Text};
-use iced::{alignment, Element, Length};
+use anixart_core::{Collection, EpisodeType, Release};
+use iced::widget::{button, container, scrollable, text, Column, Row, Text};
+use iced::{alignment, Element, Length, Viewport};
 
 use crate::app::Message;
 use crate::posters::{self, PosterCache};
@@ -91,15 +96,20 @@ pub fn join_meta(parts: Vec<String>) -> String {
         .join(" · ")
 }
 
-/// `Стр. 3 из 12` — or `Стр. 3` while the total is still unknown, because the API
-/// answers `total_page_count = 0` for an unpaginated list.
-pub fn page_summary(page: usize, total_pages: usize) -> String {
-    let shown = page + 1;
-    if total_pages == 0 {
-        format!("Стр. {shown}")
-    } else {
-        format!("Стр. {shown} из {}", total_pages.max(shown))
-    }
+/// Доля прокрутки, на которой бесконечная полка просит следующую страницу.
+///
+/// 0.88, а не 1.0: уведомление `on_scroll` приходит только когда смещение
+/// *изменилось*, так что у самого дна последний кадр может и не успеть пройти
+/// через порог — запас в 12 % гарантированно ловится ещё до последнего пикселя.
+pub const SCROLL_TRIGGER: f32 = 0.88;
+
+/// Догрели ли пользователь до конца полки — по относительному смещению прокрутки.
+///
+/// Чистая функция над `f32`, потому что ровно это решение принимает
+/// [`crate::app`] на сообщение [`Message::Scrolled`](crate::app::Message::Scrolled):
+/// виджет только передаёт смещение, а «пора догружать» живёт рядом с порогом.
+pub fn reached_end(offset: f32) -> bool {
+    offset >= SCROLL_TRIGGER
 }
 
 /// Half-open index ranges of a grid, `columns` tiles wide: `chunk(7, 3)` yields
@@ -314,6 +324,63 @@ pub fn scroll_body<'a>(content: Column<'a, Message>) -> Element<'a, Message> {
     .into()
 }
 
+/// Scrollable body of an *endless* shelf.
+///
+/// Same rails and padding as [`scroll_body`], plus two things the page buttons
+/// used to do: a `footer` line under the last row, and — while `more` is `true` —
+/// an `on_scroll` notification that turns the viewport offset into
+/// [`Message::Scrolled`](crate::app::Message::Scrolled). The app compares that
+/// offset with [`reached_end`] and asks for the next page, so a shelf grows by
+/// scrolling and never by a «Вперёд» button.
+///
+/// `more` is switched off once the shelf knows it is done: an exhausted shelf
+/// raises no notifications at all, which is the only cheap way to stop asking the
+/// endpoint for pages it has already answered with nothing.
+pub fn scroll_infinite<'a>(
+    content: Column<'a, Message>,
+    footer: Option<Element<'a, Message>>,
+    more: bool,
+) -> Element<'a, Message> {
+    let mut column = content
+        .spacing(14)
+        .padding([16, 20])
+        .width(Length::Fill);
+    if let Some(footer) = footer {
+        column = column.push(footer);
+    }
+
+    let mut body = scrollable(column)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(theme::styles::scroll);
+
+    if more {
+        body = body.on_scroll(|viewport: Viewport| Message::Scrolled(viewport.relative_offset().y));
+    }
+
+    body.into()
+}
+
+/// Низ бесконечной полки: чем она закончилась, тем она и говорит.
+///
+/// Пока догрузка в полёте — строка ожидания, когда страницы кончились — сколько
+/// релизов накоплено, а иначе — подсказка, что листать дальше не кнопками.
+pub fn shelf_tail<'a>(loading_more: bool, exhausted: bool, loaded: usize) -> Element<'a, Message> {
+    if loading_more {
+        return busy("Загружаю следующие релизы…".to_owned());
+    }
+    if exhausted {
+        return muted_centered(format!(
+            "Показаны все релизы — {}",
+            util::count_label(loaded as i64, "релиз", "релиза", "релизов")
+        ));
+    }
+    muted_centered(
+        "Прокрутите вниз: следующие релизы догрузятся сами, кнопок «Страница» здесь нет."
+            .to_owned(),
+    )
+}
+
 /// Empty-state card: what the section would hold, and what to do about it.
 pub fn empty_state<'a>(caption: String, note: String) -> Element<'a, Message> {
     card(
@@ -399,38 +466,14 @@ pub fn note<'a>(caption: String, tone: Tone) -> Element<'a, Message> {
     .into()
 }
 
-/// Page controls under a paginated grid.
-pub fn pager<'a>(
-    page: usize,
-    total_pages: usize,
-    prev: Message,
-    next: Message,
-) -> Element<'a, Message> {
-    let has_prev = page > 0;
-    let has_next = total_pages == 0 || page + 1 < total_pages;
-
-    Row::new()
-        .spacing(10)
-        .align_y(alignment::Vertical::Center)
-        .push(
-            button(button_label("Назад", 14))
-                .padding([8, 16])
-                .style(theme::styles::pill)
-                .on_press_maybe(has_prev.then_some(prev)),
-        )
-        .push(muted(page_summary(page, total_pages)))
-        .push(
-            button(button_label("Вперёд", 14))
-                .padding([8, 16])
-                .style(theme::styles::pill)
-                .on_press_maybe(has_next.then_some(next)),
-        )
-        .push(horizontal_space())
-        .into()
-}
-
-/// A poster tile of the browse / bookmarks grids. The whole card is the button,
-/// so a wall of covers reads as a catalogue rather than as a list of links.
+/// A poster tile of the endless shelves — «Главная», «Обзор», «Закладки». The whole
+/// card is the button, so a wall of covers reads as a catalogue rather than as a
+/// list of links.
+///
+/// The caption under the poster is what the official home card says: year, rating,
+/// how many series are out, the catalogue status and, when the backend bothered to
+/// fill it, the synopsis. A shelf of 25 tiles therefore answers «что это за релиз»
+/// without opening it.
 pub fn release_tile<'a>(cache: &PosterCache, release: &Release) -> Element<'a, Message> {
     let key = posters::release_key(release.id);
     let title = release_title(release);
@@ -442,11 +485,22 @@ pub fn release_tile<'a>(cache: &PosterCache, release: &Release) -> Element<'a, M
         TILE_POSTER_HEIGHT,
     );
 
+    let status = release
+        .status
+        .as_deref()
+        .map(str::trim)
+        .filter(|label| !label.is_empty())
+        .or(crate::lists::ReleaseStatus::label_of_id(release.status_id))
+        .unwrap_or_default();
+
     let meta = join_meta(vec![
         release.year.clone().unwrap_or_default(),
         grade_label(release.grade).unwrap_or_default(),
         util::episodes_label(release.episodes_released, release.episodes_total),
+        status.to_owned(),
     ]);
+
+    let description = caption(&release.description).unwrap_or_default();
 
     let mut body = Column::new().spacing(6).push(artwork).push(
         container(
@@ -460,76 +514,23 @@ pub fn release_tile<'a>(cache: &PosterCache, release: &Release) -> Element<'a, M
     if !meta.is_empty() {
         body = body.push(muted_centered(meta));
     }
+    if !description.is_empty() {
+        body = body.push(
+            container(
+                line(description.to_owned(), 12, theme::TEXT_MUTED)
+                    .wrapping(text::Wrapping::Word)
+                    .height(Length::Fixed(44.0)),
+            )
+            .height(Length::Fixed(46.0))
+            .clip(true),
+        );
+    }
 
     button(body.padding(12))
         .width(Length::Fixed(f32::from(TILE_WIDTH)))
         .style(theme::styles::card_button)
         .on_press(Message::OpenRelease(release.id))
         .into()
-}
-
-/// A feed article row: cover, title, channel, date and the two counters.
-pub fn article_card<'a>(cache: &PosterCache, item: &FeedItem) -> Element<'a, Message> {
-    let key = posters::article_key(item.id);
-    let title = item
-        .title
-        .as_deref()
-        .map(str::trim)
-        .filter(|t| !t.is_empty())
-        .unwrap_or("Статья без названия")
-        .to_owned();
-    let artwork = posters::poster_element(
-        cache.peek(&key),
-        &key,
-        &title,
-        THUMB_WIDTH,
-        THUMB_HEIGHT,
-    );
-
-    let channel = item
-        .channel
-        .as_ref()
-        .and_then(|channel| channel.title.as_deref().or(channel.name.as_deref()))
-        .and_then(|s| non_blank(Some(s)))
-        .unwrap_or("Anixart");
-
-    let mut parts = vec![channel.to_owned(), util::date_label(item.creation_date)];
-    if item.is_pinned {
-        parts.push("Закреплено".to_owned());
-    }
-
-    let counters = join_meta(vec![
-        if item.vote_count == 0 {
-            String::new()
-        } else {
-            votes_label(item.vote_count)
-        },
-        if item.comment_count == 0 {
-            String::new()
-        } else {
-            comments_label(item.comment_count)
-        },
-    ]);
-
-    card(
-        Row::new()
-            .spacing(14)
-            .align_y(alignment::Vertical::Center)
-            .push(artwork)
-            .push(
-                Column::new()
-                    .spacing(6)
-                    .push(
-                        line(title, 16, theme::TEXT).wrapping(text::Wrapping::WordOrGlyph),
-                    )
-                    .push(muted(join_meta(parts)))
-                    .push_maybe(if counters.is_empty() {
-                        None
-                    } else {
-                        Some(muted(counters))
-                    }),
-            ),
-    )
 }
 
 /// A poster box of arbitrary size, for the release page hero and the profile
@@ -715,12 +716,37 @@ mod tests {
     }
 
     #[test]
-    fn page_counts_are_one_based_and_survive_an_unknown_total() {
-        assert_eq!(page_summary(0, 0), "Стр. 1");
-        assert_eq!(page_summary(0, 12), "Стр. 1 из 12");
-        assert_eq!(page_summary(4, 12), "Стр. 5 из 12");
-        // the API may report fewer pages than the one being displayed
-        assert_eq!(page_summary(4, 2), "Стр. 5 из 5");
+    fn the_scroll_trigger_fires_only_near_the_bottom_and_never_above_it() {
+        assert!(!reached_end(0.0), "верх полки — не повод догружать");
+        assert!(!reached_end(0.5));
+        assert!(!reached_end(SCROLL_TRIGGER - 0.01));
+        assert!(reached_end(SCROLL_TRIGGER), "сам порог уже считается дном");
+        assert!(reached_end(0.95));
+        assert!(reached_end(1.0), "дно — всегда повод");
+        // порог оставлен с запасом до единицы: последний кадр прокрутки обязан
+        // пойматься, пока смещение ещё не дошло до 1.0
+        assert!(SCROLL_TRIGGER > 0.5);
+        assert!(SCROLL_TRIGGER < 1.0);
+        // отрицательное смещение — не дно, каким бы оно ни было в отладке
+        assert!(!reached_end(-1.0));
+    }
+
+    #[test]
+    fn the_shelf_tail_and_the_infinite_body_build_headlessly() {
+        // Никакого рендера не нужно, чтобы собрать дерево: проверка, что нога полки
+        // и бесконечное тело строятся без паники во всех трёх состояниях — загрузка,
+        // конец выборки, «ещё есть куда идти».
+        let _loading = shelf_tail(true, false, 25);
+        let _end = shelf_tail(false, true, 48);
+        let _more = shelf_tail(false, false, 25);
+
+        let _no_footer = scroll_infinite(Column::new().push(container(text("25 плиток"))), None, true);
+        let _with_footer = scroll_infinite(
+            Column::new().push(container(text("48 плиток"))),
+            Some(shelf_tail(false, true, 48)),
+            false,
+        );
+        let _plain = scroll_body(Column::new().push(container(text("обычный экран"))));
     }
 
     #[test]

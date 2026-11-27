@@ -63,7 +63,7 @@ mod app_tests {
     use crate::app::{App, Message, Screen};
     use crate::lists::{BrowseTab, FeedCategory};
     use crate::login::{LoginMethod, PasteTarget};
-    use crate::player::{mpv_arguments, play_with_mpv};
+    use crate::player::{mpv_arguments, play_external as play_with_mpv};
     use crate::release::ReleaseView;
     use crate::session::SessionStore;
 
@@ -371,13 +371,18 @@ mod app_tests {
             .with_quality("Default", "https://kodik.example/1.mp4")
             .with_header("Referer", "https://kodik.info/");
 
-        let arguments = mpv_arguments(&video, "Наруто — №12 · Битва за Коноху").unwrap();
+        let socket = std::path::Path::new("/tmp/mpv-test.sock");
+        let arguments = mpv_arguments(&video, "Наруто — №12 · Битва за Коноху", socket, None).unwrap();
         assert_eq!(
             arguments,
             vec![
                 "--force-window=immediate".to_owned(),
                 "--no-terminal".to_owned(),
+                "--really-quiet".to_owned(),
+                "--hwdec=auto-safe".to_owned(),
+                "--keep-open=yes".to_owned(),
                 "--title=Наруто — №12 · Битва за Коноху".to_owned(),
+                "--input-ipc-server=/tmp/mpv-test.sock".to_owned(),
                 "https://kodik.example/1.mp4".to_owned(),
                 "--http-header-fields=Referer: https://kodik.info/".to_owned(),
             ],
@@ -385,8 +390,8 @@ mod app_tests {
         );
 
         // пустая подпись не рождает голого тире в заголовке окна
-        let arguments = mpv_arguments(&video, "   ").unwrap();
-        assert_eq!(arguments[2], "https://kodik.example/1.mp4");
+        let arguments = mpv_arguments(&video, "   ", socket, None).unwrap();
+        assert_eq!(arguments[6], "https://kodik.example/1.mp4");
         assert!(arguments.iter().all(|argument| !argument.contains("--title=")));
     }
 

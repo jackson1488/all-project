@@ -36,7 +36,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use anixart_parsers::ParsedVideo;
-use iced::widget::{button, horizontal_space, progress_bar, text, Column, Row};
+use iced::widget::{button, horizontal_space, progress_bar, Column, Row};
 use iced::{alignment, Element, Length};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
@@ -144,8 +144,8 @@ impl Player {
     }
 
     /// Жив ли процесс прямо сейчас.
-    pub fn alive(&self) -> bool {
-        match self.mpv.as_ref() {
+    pub fn alive(&mut self) -> bool {
+        match self.mpv.as_mut() {
             Some(mpv) => mpv.child.try_wait().map(|exit| exit.is_none()).unwrap_or(false),
             None => false,
         }
@@ -294,6 +294,15 @@ pub fn play_external(video: &ParsedVideo, caption: &str) -> Result<(), String> {
         .spawn()
         .map_err(|error| format!("mpv не запустился: {error}"))?;
     Ok(())
+}
+
+/// Одна управляющая команда в сокет mpv.
+pub async fn ipc(
+    socket: PathBuf,
+    command: Vec<String>,
+) -> Result<Option<serde_json::Value>, String> {
+    let mut values = ipc_multi(socket, vec![command]).await?;
+    Ok(values.pop().flatten())
 }
 
 /// Несколько команд одним соединением: mpv отвечает на каждую своей строкой.
@@ -457,11 +466,11 @@ pub fn view<'a>(
 
 /// Прикреплённая шапка: возврат, постер, название, озвучка и источник, полоса,
 /// качество, управление.
-fn header_block(
-    player: &Player,
-    releases: &ReleaseView,
-    cache: &PosterCache,
-) -> Element<'_, Message> {
+fn header_block<'a>(
+    player: &'a Player,
+    releases: &'a ReleaseView,
+    cache: &'a PosterCache,
+) -> Element<'a, Message> {
     let mut head = Column::new().spacing(10);
 
     let top = Row::new()

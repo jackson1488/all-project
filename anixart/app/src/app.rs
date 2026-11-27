@@ -245,6 +245,8 @@ pub enum Message {
     PlayerNext,
     /// «← Назад к сериям»: процесс убивается, сокет стирается, экран отступает.
     PlayerBack,
+    /// Тик таймера подписки: пора опросить mpv.
+    PlayerTickPoll,
     /// Ответ подписки [`Player::tick`]: позиция, длительность, пауза.
     PlayerTick(Result<Vec<Option<serde_json::Value>>, String>),
     /// Ответ одной управлющей команды: `Ok` — mpv принял, `Err` — подсказка в шапку.
@@ -1184,6 +1186,10 @@ impl App {
                 }
                 Task::none()
             }
+            Message::PlayerTickPoll => match self.player.tick() {
+                Some(fut) => Task::perform(fut, Message::PlayerTick),
+                None => Task::none(),
+            },
             Message::PlayerTick(reply) => {
                 apply_tick(&mut self.player, reply.map(|values| values.to_vec()));
                 Task::none()
@@ -1527,10 +1533,10 @@ impl App {
         let resizes = iced::window::resize_events()
             .map(|(window, size)| Message::WindowResized(window, size));
 
-        let Some(tick) = self.player.tick() else {
+        if self.player.socket().is_none() {
             return resizes;
-        };
-        let clock = iced::time::every(TICK_INTERVAL).map(move |_| Message::PlayerTick(Ok(tick)));
+        }
+        let clock = iced::time::every(TICK_INTERVAL).map(|_| Message::PlayerTickPoll);
         iced::Subscription::batch([resizes, clock])
     }
 

@@ -950,9 +950,9 @@ mod tests {
         assert_eq!(GRID_GAP, 12.0);
 
         // каждая следующая колонка открывается, только когда плитке хватает её ширины
-        assert_eq!(grid_columns(2 * TILE_WIDTH as f32 + 3.0 * GRID_GAP, GRID_GAP), 2);
+        assert_eq!(grid_columns(2.0 * TILE_WIDTH as f32 + 3.0 * GRID_GAP, GRID_GAP), 2);
         assert_eq!(
-            grid_columns(2 * TILE_WIDTH as f32 + 2.0 * GRID_GAP, GRID_GAP),
+            grid_columns(2.0 * TILE_WIDTH as f32 + 2.0 * GRID_GAP, GRID_GAP),
             1,
             "ровно двух плиток без второго зазора не хватает на две колонки"
         );

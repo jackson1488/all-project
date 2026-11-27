@@ -144,11 +144,8 @@ impl Player {
     }
 
     /// Жив ли процесс прямо сейчас.
-    pub fn alive(&mut self) -> bool {
-        match self.mpv.as_mut() {
-            Some(mpv) => mpv.child.try_wait().map(|exit| exit.is_none()).unwrap_or(false),
-            None => false,
-        }
+    pub fn alive(&self) -> bool {
+        self.mpv.is_some()
     }
 
     /// Путь сокета для подписки и команд.
